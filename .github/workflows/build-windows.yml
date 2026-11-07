@@ -23,7 +23,7 @@ jobs:
         run: npm install
 
       - name: Compilar aplicativo
-        run: npm run dist
+        run: npm run dist -- --publish never
 
       - name: Disponibilizar instalador
         uses: actions/upload-artifact@v4
