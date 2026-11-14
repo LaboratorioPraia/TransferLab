@@ -84,7 +84,8 @@ ipcMain.handle('diagnostic-read-logs', async () => {
   } catch {
     return [];
   }
-});\nipcMain.handle('diagnostic-log', async (_e, entry) => {
+});
+ipcMain.handle('diagnostic-log', async (_e, entry) => {
   try { await appendLog({ level: entry.level || 'info', event: String(entry.event || 'client-log').slice(0, 120), details: entry.details || null }); return true; }
   catch { return false; }
 });
