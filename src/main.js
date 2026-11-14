@@ -6,6 +6,8 @@ const crypto = require('crypto');
 
 let win;
 let watcher = null;
+const watchPending = new Set();
+const watchDelivered = new Map();
 const configPath = () => path.join(app.getPath('userData'), 'settings.json');
 const logFile = () => path.join(app.getPath('userData'), 'logs', 'transferlab.log');
 const defaults = () => ({ deviceId: crypto.randomUUID(), trustedDevices: [], peerTokens: {}, receiveFolder: path.join(os.homedir(), 'Downloads', 'TransferLab'), monitorFolder: '', autoTargetPeerId: '', autoStart: false });
@@ -77,23 +79,30 @@ ipcMain.handle('start-folder-watch', async () => {
   watcher = fs.watch(c.monitorFolder, { persistent: true }, async (_event, filename) => {
     if (!filename) return;
     const full = path.join(c.monitorFolder, filename.toString());
+    if (watchPending.has(full)) return;
+    watchPending.add(full);
     try {
       const stat = await fs.promises.stat(full);
       if (!stat.isFile()) return;
       let previous = -1, stable = 0;
-      for (let i = 0; i < 90 && stable < 4; i++) {
+      for (let i = 0; i < 120 && stable < 10; i++) {
         await new Promise(resolve => setTimeout(resolve, 1000));
         const current = await fs.promises.stat(full);
         if (!current.isFile()) return;
-        if (current.size === previous && current.size > 0) stable++; else stable = 0;
+        if (current.size === previous) stable++; else stable = 0;
         previous = current.size;
       }
-      if (stable < 4) { await appendLog({ level: 'warning', event: 'monitored-file-never-stabilized', details: { file: path.basename(full) } }); return; }
+      if (stable < 10) { await appendLog({ level: 'warning', event: 'monitored-file-never-stabilized', details: { file: path.basename(full) } }); return; }
+      const finalStat = await fs.promises.stat(full);
+      const signature = finalStat.size + ':' + finalStat.mtimeMs;
+      if (watchDelivered.get(full) === signature) return;
       const handle = await fs.promises.open(full, 'r');
       await handle.close();
-      if (win && !win.isDestroyed()) win.webContents.send('folder-file-ready', { path: full, name: path.basename(full), size: (await fs.promises.stat(full)).size });
+      watchDelivered.set(full, signature);
+      if (win && !win.isDestroyed()) win.webContents.send('folder-file-ready', { path: full, name: path.basename(full), size: finalStat.size });
       await appendLog({ level: 'info', event: 'monitored-file-ready', details: { file: path.basename(full) } });
     } catch (e) { await appendLog({ level: 'warning', event: 'folder-watch-file-error', details: { file: path.basename(full), message: e.message } }); }
+    finally { watchPending.delete(full); }
   });
   return { ok: true };
 });
@@ -139,8 +148,10 @@ ipcMain.handle('save-chunk', async (_e, filePath, buffer, position) => {
 ipcMain.handle('save-finish', async (_e, filePath, finalPath, expectedSize) => {
   const stat = await fs.promises.stat(filePath);
   if (stat.size !== expectedSize) return { ok: false, size: stat.size };
-  await fs.promises.rename(filePath, finalPath);
-  return { ok: true, size: stat.size, path: finalPath };
+  let destination = finalPath;
+  if (fs.existsSync(destination)) { const ext = path.extname(finalPath), base = path.basename(finalPath, ext), dir = path.dirname(finalPath); let i = 1; while (fs.existsSync(destination)) destination = path.join(dir, base + ' (' + i++ + ')' + ext); }
+  await fs.promises.rename(filePath, destination);
+  return { ok: true, size: stat.size, path: destination };
 });
 ipcMain.handle('save-abort', async (_e, filePath) => { try { await fs.promises.unlink(filePath); return true; } catch { return false; } });
 ipcMain.handle('open-path', async (_e, p) => shell.showItemInFolder(p));
