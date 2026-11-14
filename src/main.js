@@ -20,7 +20,7 @@ async function writeConfig(patch) {
   await fs.promises.writeFile(configPath(), JSON.stringify(next, null, 2), 'utf8');
   return next;
 }
-async function readLogs() { try { return (await fs.promises.readFile(logFile(), 'utf8')).trim().split('\\n').filter(Boolean).slice(-500).map(line => { try { return JSON.parse(line); } catch { return { raw: line }; } }); } catch { return []; } }
+async function readLogs() { try { return (await fs.promises.readFile(logFile(), 'utf8')).trim().split('\n').filter(Boolean).slice(-500).map(line => { try { return JSON.parse(line); } catch { return { raw: line }; } }); } catch { return []; } }
 async function appendLog(entry) {
   const file = logFile();
   await fs.promises.mkdir(path.dirname(file), { recursive: true });
