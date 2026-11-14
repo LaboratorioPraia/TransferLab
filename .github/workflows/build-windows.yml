@@ -22,6 +22,12 @@ jobs:
       - name: Instalar dependencias
         run: npm install
 
+      - name: Validar sintaxe JavaScript
+        run: |
+          node --check src/main.js
+          node --check src/preload.js
+          node --check src/renderer.js
+
       - name: Compilar aplicativo
         run: npm run dist -- --publish never
 
