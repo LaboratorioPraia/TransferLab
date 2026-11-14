@@ -81,6 +81,7 @@ async function init() {
       debug: 0
     });
 
+    window.transferPeer = peer;
     peer.on('open', id => {
       $('myId').textContent = id;
       $('connectionState').textContent = 'Pronto para conectar';
@@ -97,6 +98,7 @@ async function init() {
 
     peer.on('error', error => {
       console.error('PeerJS:', error);
+      window.transferAPI.diagnosticLog({ level: 'error', event: 'peerjs-error', details: { type: error.type, message: error.message } });
       $('connectionState').textContent = 'Falha no serviço de conexão';
       toast('Falha na conexão: ' + (error.type || 'erro desconhecido'));
     });
@@ -113,6 +115,7 @@ async function init() {
 
 function attach(connection) {
   conn = connection;
+  window.transferConnection = connection;
   setConnected(false);
   connection.on('open', () => {
     if (conn !== connection) return;
@@ -128,6 +131,7 @@ function attach(connection) {
   });
   connection.on('error', error => {
     console.error('DataConnection:', error);
+    window.transferAPI.diagnosticLog({ level: 'error', event: 'data-connection-error', details: { message: error.message } });
     toast('Erro no canal de transferência.');
   });
   connection.on('data', data => {
@@ -174,6 +178,7 @@ $('sendBtn').onclick = async () => {
     renderFiles();
   } catch (error) {
     console.error(error);
+    window.transferAPI.diagnosticLog({ level: 'error', event: 'transfer-failed', details: { message: error.message, stack: error.stack } });
     toast('A transferência foi interrompida: ' + error.message);
   } finally {
     renderFiles();
@@ -211,7 +216,8 @@ async function sendFile(file) {
     const length = Math.min(CHUNK, file.size - offset);
     const chunk = await window.transferAPI.readChunk(file.path, offset, length);
     if (!chunk || !chunk.byteLength) throw new Error('Não foi possível ler o arquivo de origem.');
-    conn.send({ type: 'file-chunk', id, offset, data: encodeBase64(chunk) });
+    try { conn.send({ type: 'file-chunk', id, offset, data: encodeBase64(chunk) }); }
+    catch (error) { throw new Error('Falha ao transmitir bloco ' + offset + ': ' + error.message); }
     offset += chunk.byteLength;
 
     const percent = Math.floor(offset / file.size * 100);
@@ -224,7 +230,8 @@ async function sendFile(file) {
   }
 
   const completed = waitFor(pendingComplete, id, 120000, 'confirmação');
-  conn.send({ type: 'file-end', id });
+  try { conn.send({ type: 'file-end', id }); }
+  catch (error) { throw new Error('Falha ao finalizar o envio: ' + error.message); }
   if (!(await completed)) throw new Error('O destinatário não confirmou a gravação do arquivo.');
   ui.bar.style.width = '100%';
   ui.pct.textContent = 'Enviado';
