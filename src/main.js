@@ -75,7 +75,7 @@ ipcMain.handle('diagnostic-self-test', async () => {
   catch (e) { result.logError = e.message; }
   return { ...result, appVersion: app.getVersion(), platform: process.platform, arch: process.arch, freeMemory: os.freemem(), totalMemory: os.totalmem() };
 });
-ipcMain.handle('diagnostic-log', async (_e, entry) => {
+ipcMain.handle('diagnostic-read-logs', async () => {\n  try { const raw = await fs.promises.readFile(logFile(), 'utf8'); return raw.trim().split('\\n').slice(-250).map(line => { try { return JSON.parse(line); } catch { return { raw: line }; } }); }\n  catch { return []; }\n});\nipcMain.handle('diagnostic-log', async (_e, entry) => {
   try { await appendLog({ level: entry.level || 'info', event: String(entry.event || 'client-log').slice(0, 120), details: entry.details || null }); return true; }
   catch { return false; }
 });
