@@ -39,7 +39,7 @@ async function init() {
 function attach(connection) {
   conn=connection; remoteDevice=null; remoteAuthenticated=false; window.transferConnection=connection; setConnected(false);
   connection.on('open',()=>{if(conn!==connection)return;setConnected(true);connection.send({type:'hello',device:{id:deviceInfo.id,name:deviceInfo.name}});toast('Conexão estabelecida.');});
-  connection.on('data',data=>{receiveQueue=receiveQueue.then(()=>conn===connection?handleData(data):undefined).catch(e=>{console.error(e);window.transferAPI.diagnosticLog({level:'error',event:'receive-handler-failed',details:{message:e.message,stack:e.stack}});toast('Erro ao processar recebimento: '+e.message);});});
+  connection.on('data',data=>{receiveQueue=receiveQueue.then(()=>conn===connection?handleData(data):undefined).catch(e=>{console.error(e);window.transferAPI.diagnosticLog({level:'error',event:'receive-handler-failed',details:{message:e.message,stack:e.stack}});if(incoming){try{conn?.send({type:'file-reject',id:incoming.id,reason:'disk-or-protocol-error'});}catch{}window.transferAPI.saveAbort(incoming.path);incoming=null;}toast('Erro ao processar recebimento: '+e.message);});});
   connection.on('close',()=>{if(conn===connection){conn=null;remoteDevice=null;setConnected(false);} if(incoming){window.transferAPI.saveAbort(incoming.path);incoming=null;} rejectPending('A conexão foi encerrada.');});
   connection.on('error',e=>{console.error(e);window.transferAPI.diagnosticLog({level:'error',event:'data-connection-error',details:{message:e.message}});toast('Erro no canal de transferência.');});
 }
@@ -82,7 +82,7 @@ async function handleData(data) {
     conn.send({type:'file-accept',id:data.id});return;
   }
   if(data.type==='file-accept'){pendingAccept.get(data.id)?.(true);return;}
-  if(data.type==='file-reject'){pendingAccept.get(data.id)?.(false);pendingComplete.get(data.id)?.(false);for(const [key,resolve] of pendingChunk){if(key.startsWith(data.id+':'))resolve(false);}toast('Arquivo recusado pelo destinatário ('+(data.reason||'recusado')+').');return;}
+  if(data.type==='file-reject'){expectedSizes.delete(data.id);pendingAccept.get(data.id)?.(false);pendingComplete.get(data.id)?.(false);for(const [key,resolve] of pendingChunk){if(key.startsWith(data.id+':'))resolve(false);}toast('Arquivo recusado pelo destinatário ('+(data.reason||'recusado')+').');return;}
   if(data.type==='file-chunk'){
     if(!incoming||data.id!==incoming.id||typeof data.data!=='string'){conn.send({type:'file-chunk-ack',id:data.id,offset:data.offset,ok:false});return;}
     const buffer=decodeBase64(data.data);
