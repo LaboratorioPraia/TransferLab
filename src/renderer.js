@@ -1,7 +1,7 @@
 const CHUNK = 64 * 1024;
 let peer = null, conn = null, files = [], incoming = null, deviceInfo = null, settings = null, remoteDevice = null, remoteAuthenticated = false;
 let transfers = 0, receiveQueue = Promise.resolve(), autoSending = false;
-const pendingAccept = new Map(), pendingComplete = new Map(), pendingChunk = new Map();
+const pendingAccept = new Map(), pendingComplete = new Map(), pendingChunk = new Map(), expectedSizes = new Map();
 const $ = id => document.getElementById(id);
 const toast = message => { const el = $('toast'); el.textContent = message; el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 4000); };
 function fmt(n) { if (n < 1024) return n + ' B'; const u=['KB','MB','GB','TB']; let i=-1; do { n/=1024; i++; } while(n>=1024&&i<u.length-1); return n.toFixed(1)+' '+u[i]; }
@@ -49,7 +49,7 @@ function renderFiles(){$('selectedFiles').textContent=files.length?files.map(f=>
 $('sendBtn').onclick=async()=>{if(!conn?.open)return toast('Conecte-se ao dispositivo primeiro.');$('sendBtn').disabled=true;try{for(const f of files)await sendFile(f);files=[];renderFiles();}catch(e){console.error(e);window.transferAPI.diagnosticLog({level:'error',event:'transfer-failed',details:{message:e.message,stack:e.stack}});toast('Transferência interrompida: '+e.message);}finally{renderFiles();}};
 async function sendFile(file) {
   if(!conn?.open)throw new Error('Conexão indisponível.');
-  const id=crypto.randomUUID(),ui=row(file.name,file.size,'send');
+  const id=crypto.randomUUID(),ui=row(file.name,file.size,'send'); expectedSizes.set(id,file.size);
   const accepted=waitFor(pendingAccept,id,120000); conn.send({type:'file-start',id,name:file.name,size:file.size});
   if(!(await accepted)){ui.pct.textContent='Não aceito';ui.meta.textContent=fmt(file.size)+' · Não recebido';throw new Error('Destinatário não aceitou ou não respondeu.');}
   let offset=0;
@@ -63,7 +63,7 @@ async function sendFile(file) {
     offset+=chunk.byteLength; const pct=Math.floor(offset/file.size*100);ui.bar.style.width=pct+'%';ui.pct.textContent=pct+'%';
   }
   const completed=waitFor(pendingComplete,id,120000);conn.send({type:'file-end',id});
-  if(!(await completed))throw new Error('Destinatário não confirmou a gravação final.');
+  if(!(await completed))throw new Error('Destinatário não confirmou a gravação final ou o tamanho divergiu.');
   ui.bar.style.width='100%';ui.pct.textContent='100%';ui.meta.textContent=fmt(file.size)+' · Recebimento confirmado';
   await window.transferAPI.diagnosticLog({level:'info',event:'transfer-sent-confirmed',details:{name:file.name,size:file.size}});
 }
@@ -82,7 +82,7 @@ async function handleData(data) {
     conn.send({type:'file-accept',id:data.id});return;
   }
   if(data.type==='file-accept'){pendingAccept.get(data.id)?.(true);return;}
-  if(data.type==='file-reject'){pendingAccept.get(data.id)?.(false);toast('Arquivo recusado pelo destinatário.');return;}
+  if(data.type==='file-reject'){pendingAccept.get(data.id)?.(false);pendingComplete.get(data.id)?.(false);for(const [key,resolve] of pendingChunk){if(key.startsWith(data.id+':'))resolve(false);}toast('Arquivo recusado pelo destinatário ('+(data.reason||'recusado')+').');return;}
   if(data.type==='file-chunk'){
     if(!incoming||data.id!==incoming.id||typeof data.data!=='string'){conn.send({type:'file-chunk-ack',id:data.id,offset:data.offset,ok:false});return;}
     const buffer=decodeBase64(data.data);
@@ -100,7 +100,7 @@ async function handleData(data) {
     else{conn.send({type:'file-reject',id:current.id,reason:'write-failed'});current.ui.pct.textContent='Falha';}
     incoming=null;return;
   }
-  if(data.type==='file-complete'){if(data.size>=0)pendingComplete.get(data.id)?.(true);return;}
+  if(data.type==='file-complete'){const expected=expectedSizes.get(data.id);expectedSizes.delete(data.id);pendingComplete.get(data.id)?.(Number(data.size)===expected);return;}
 }
 async function autoSendFile(file){
   if(autoSending)return;
