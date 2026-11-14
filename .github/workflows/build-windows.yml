@@ -27,6 +27,7 @@ jobs:
           node --check src/main.js
           node --check src/preload.js
           node --check src/renderer.js
+          node --check src/diagnostics.js
 
       - name: Compilar aplicativo
         run: npm run dist -- --publish never
@@ -34,6 +35,6 @@ jobs:
       - name: Disponibilizar instalador
         uses: actions/upload-artifact@v4
         with:
-          name: TransferLab-Windows-Installer
+          name: TransferLab-0.1.2-Windows-Installer
           path: release/*.exe
           if-no-files-found: error
