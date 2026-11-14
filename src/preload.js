@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('transferAPI', {
   saveFinish: p => ipcRenderer.invoke('save-finish', p),
   openPath: p => ipcRenderer.invoke('open-path', p),
   diagnosticSelfTest: () => ipcRenderer.invoke('diagnostic-self-test'),
-  diagnosticLog: entry => ipcRenderer.invoke('diagnostic-log', entry),\n  diagnosticReadLogs: () => ipcRenderer.invoke('diagnostic-read-logs'),
+  diagnosticLog: entry => ipcRenderer.invoke('diagnostic-log', entry),
+  diagnosticReadLogs: () => ipcRenderer.invoke('diagnostic-read-logs'),
   exportDiagnosticReport: report => ipcRenderer.invoke('export-diagnostic-report', report)
 });
