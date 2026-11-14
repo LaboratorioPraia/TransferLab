@@ -141,7 +141,7 @@ ipcMain.handle('save-start', async (_e, name, autoReceive) => {
 });
 ipcMain.handle('save-chunk', async (_e, filePath, buffer, position) => {
   const fd = await fs.promises.open(filePath, 'r+');
-  try { await fd.write(Buffer.from(buffer), 0, buffer.byteLength, position); }
+  try { const data = Buffer.from(buffer); let written = 0; while (written < data.length) { const result = await fd.write(data, written, data.length - written, position + written); if (!result.bytesWritten) throw new Error('A gravação do bloco foi interrompida.'); written += result.bytesWritten; } }
   finally { await fd.close(); }
   return true;
 });
