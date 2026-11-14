@@ -11,7 +11,7 @@ Aplicativo Windows para transferência de arquivos entre PCs pela internet usand
 - Pareamento de dispositivo confiável com chave compartilhada aleatória; o receptor só faz recebimento sem diálogo após autenticar o dispositivo.
 - Pasta padrão de recebimento para dispositivos autenticados.
 - Monitoramento de uma pasta para envio automático ao dispositivo permanente configurado.
-- Antes de enviar automaticamente, aguarda quatro intervalos consecutivos de tamanho estável e verifica se o arquivo pode ser aberto para leitura.
+- Antes de enviar automaticamente, aguarda dez intervalos consecutivos de tamanho estável e verifica se o arquivo pode ser aberto para leitura.
 - Opção para iniciar com o Windows.
 - Autodiagnóstico com exportação de relatório JSON e logs técnicos.
 
@@ -30,7 +30,7 @@ Aplicativo Windows para transferência de arquivos entre PCs pela internet usand
 4. Salve as configurações.
 5. No receptor, o PC remetente precisa estar cadastrado como confiável.
 
-O monitor aguarda o tamanho permanecer igual por quatro intervalos consecutivos de um segundo. Também tenta abrir o arquivo para leitura. Se não estabilizar em até 90 segundos, o arquivo não será enviado. Para arquivos que programas deixam temporariamente parados antes de continuar escrevendo, aumente esse intervalo em versão futura ou mantenha o envio manual.
+O monitor aguarda o tamanho permanecer igual por dez intervalos consecutivos de um segundo. Também tenta abrir o arquivo para leitura. Se não estabilizar em até 120 segundos, o arquivo não será enviado. Para arquivos que programas deixam temporariamente parados antes de continuar escrevendo, aumente esse intervalo em versão futura ou mantenha o envio manual.
 
 ## Diagnóstico
 Em Configurações, clique “Executar autodiagnóstico” e depois “Exportar relatório JSON”. O relatório inclui estado de rede, sessão PeerJS, canal WebRTC, testes de escrita/leitura e logs recentes. Envie o JSON quando houver falha.
