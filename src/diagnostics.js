@@ -10,7 +10,7 @@
     const results = [];
     results.push(check('Interface carregada', !!document.getElementById('sendBtn'), 'Componentes principais encontrados.'));
     results.push(check('API segura do aplicativo', !!window.transferAPI?.deviceInfo, 'Preload / IPC disponível.'));
-    results.push(check('Biblioteca PeerJS', typeof window.Peer === 'function', typeof window.Peer));
+    results.push(check('Biblioteca PeerJS', typeof window.Peer === 'function', typeof window.Peer));\n    results.push(check('Internet disponível', navigator.onLine, navigator.onLine ? 'Navegador informa conexão ativa.' : 'Sem conexão de rede detectada.'));\n    results.push(check('WebRTC no navegador', !!(window.RTCPeerConnection || window.webkitRTCPeerConnection), 'Suporte necessário para conexão direta entre dispositivos.'));
     let device = null;
     try { device = await window.transferAPI.deviceInfo(); results.push(check('Identificação do dispositivo', !!device?.name && !!device?.id, device ? device.name + ' · ' + device.version : 'Sem resposta')); }
     catch (e) { results.push(check('Identificação do dispositivo', false, e.message)); }
@@ -23,7 +23,7 @@
     results.push(check('Conexão com servidor PeerJS', !!peer?.open && !peer?.destroyed, peer?.id ? 'Sessão ativa: ' + peer.id : 'Sem sessão ativa; verifique internet/firewall.'));
     results.push(check('Conexão com outro dispositivo', !!conn?.open, conn?.open ? 'Canal de dados aberto.' : 'Nenhum dispositivo conectado.'));
     results.push(check('Canal de transferência', !!conn?.dataChannel && conn.dataChannel.readyState === 'open', conn?.dataChannel?.readyState || 'Canal indisponível.'));
-    const failed = results.filter(item => !item.ok).length;
+    let recentLogs = [];\n    try { recentLogs = await window.transferAPI.diagnosticReadLogs(); } catch (e) { recentLogs = [{ level: 'error', event: 'read-logs-failed', details: e.message }]; }\n    const failed = results.filter(item => !item.ok).length;
     const report = {
       product: 'TransferLab', reportVersion: 1, generatedAt: new Date().toISOString(),
       app: device || {}, userAgent: navigator.userAgent,
