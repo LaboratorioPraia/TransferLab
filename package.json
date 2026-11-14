@@ -1,19 +1,43 @@
 {
   "name": "transferlab",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Transferência segura de arquivos entre dispositivos",
   "main": "src/main.js",
   "author": "TransferLab",
   "license": "MIT",
-  "scripts": {"start":"electron .", "dist":"electron-builder --win nsis"},
-  "dependencies": {"peerjs":"^1.5.4"},
-  "devDependencies": {"electron":"^35.1.5", "electron-builder":"^26.0.12"},
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis"
+  },
+  "dependencies": {
+    "peerjs": "^1.5.4"
+  },
+  "devDependencies": {
+    "electron": "^35.1.5",
+    "electron-builder": "^26.0.12"
+  },
   "build": {
-    "appId":"com.transferlab.desktop",
-    "productName":"TransferLab",
-    "directories":{"output":"release"},
-    "files":["src/**/*","package.json","node_modules/peerjs/**/*"],
-    "win":{"target":["nsis"],"artifactName":"TransferLab-Setup-${version}.${ext}"},
-    "nsis":{"oneClick":false,"allowToChangeInstallationDirectory":true,"createDesktopShortcut":true,"createStartMenuShortcut":true}
+    "appId": "com.transferlab.desktop",
+    "productName": "TransferLab",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "node_modules/peerjs/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "TransferLab-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   }
 }
