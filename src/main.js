@@ -8,10 +8,10 @@ let win;
 let watcher = null;
 const configPath = () => path.join(app.getPath('userData'), 'settings.json');
 const logFile = () => path.join(app.getPath('userData'), 'logs', 'transferlab.log');
-const defaults = { deviceId: crypto.randomUUID(), trustedDevices: [], receiveFolder: path.join(app.getPath('downloads'), 'TransferLab'), monitorFolder: '', autoTargetPeerId: '', autoStart: false };
+const defaults = () => ({ deviceId: crypto.randomUUID(), trustedDevices: [], receiveFolder: path.join(os.homedir(), 'Downloads', 'TransferLab'), monitorFolder: '', autoTargetPeerId: '', autoStart: false });
 async function readConfig() {
-  try { return { ...defaults, ...JSON.parse(await fs.promises.readFile(configPath(), 'utf8')) }; }
-  catch { return { ...defaults }; }
+  try { const stored = JSON.parse(await fs.promises.readFile(configPath(), 'utf8')); return { ...defaults(), ...stored }; }
+  catch { const initial = defaults(); await fs.promises.mkdir(path.dirname(configPath()), { recursive: true }); await fs.promises.writeFile(configPath(), JSON.stringify(initial, null, 2), 'utf8'); return initial; }
 }
 async function writeConfig(patch) {
   const current = await readConfig();
@@ -20,6 +20,7 @@ async function writeConfig(patch) {
   await fs.promises.writeFile(configPath(), JSON.stringify(next, null, 2), 'utf8');
   return next;
 }
+async function readLogs() { try { return (await fs.promises.readFile(logFile(), 'utf8')).trim().split('\\n').filter(Boolean).slice(-500).map(line => { try { return JSON.parse(line); } catch { return { raw: line }; } }); } catch { return []; } }
 async function appendLog(entry) {
   const file = logFile();
   await fs.promises.mkdir(path.dirname(file), { recursive: true });
@@ -157,7 +158,7 @@ ipcMain.handle('export-diagnostic-report', async (_e, report) => {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const target = await dialog.showSaveDialog(win, { defaultPath: 'TransferLab-diagnostico-' + stamp + '.json', filters: [{ name: 'Relatório JSON', extensions: ['json'] }] });
   if (target.canceled || !target.filePath) return { canceled: true };
-  const logs = await ipcMain.handlers?.get?.('diagnostic-read-logs')?.() || [];
+  const logs = await readLogs();
   await fs.promises.writeFile(target.filePath, JSON.stringify({ ...report, logs }, null, 2), 'utf8');
   return { canceled: false, path: target.filePath };
 });
