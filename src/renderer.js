@@ -1,5 +1,5 @@
 const CHUNK = 64 * 1024;
-let peer = null, conn = null, files = [], incoming = null, deviceInfo = null, settings = null, remoteDevice = null;
+let peer = null, conn = null, files = [], incoming = null, deviceInfo = null, settings = null, remoteDevice = null, remoteAuthenticated = false;
 let transfers = 0, receiveQueue = Promise.resolve(), autoSending = false;
 const pendingAccept = new Map(), pendingComplete = new Map(), pendingChunk = new Map();
 const $ = id => document.getElementById(id);
@@ -37,7 +37,7 @@ async function init() {
   } catch(e) { console.error(e);toast('Não foi possível iniciar: '+e.message);window.transferAPI.diagnosticLog({level:'error',event:'startup-failed',details:{message:e.message,stack:e.stack}}); }
 }
 function attach(connection) {
-  conn=connection; remoteDevice=null; window.transferConnection=connection; setConnected(false);
+  conn=connection; remoteDevice=null; remoteAuthenticated=false; window.transferConnection=connection; setConnected(false);
   connection.on('open',()=>{if(conn!==connection)return;setConnected(true);connection.send({type:'hello',device:{id:deviceInfo.id,name:deviceInfo.name}});toast('Conexão estabelecida.');});
   connection.on('data',data=>{receiveQueue=receiveQueue.then(()=>conn===connection?handleData(data):undefined).catch(e=>{console.error(e);window.transferAPI.diagnosticLog({level:'error',event:'receive-handler-failed',details:{message:e.message,stack:e.stack}});toast('Erro ao processar recebimento: '+e.message);});});
   connection.on('close',()=>{if(conn===connection){conn=null;remoteDevice=null;setConnected(false);} if(incoming){window.transferAPI.saveAbort(incoming.path);incoming=null;} rejectPending('A conexão foi encerrada.');});
@@ -69,11 +69,13 @@ async function sendFile(file) {
 }
 async function handleData(data) {
   if(!data||typeof data!=='object')return;
-  if(data.type==='hello'){if(data.device&&typeof data.device.id==='string'){remoteDevice={id:data.device.id,name:String(data.device.name||'Dispositivo')};$('trustCurrentBtn').disabled=false;$('remoteDeviceLabel').textContent=remoteDevice.name+' · '+remoteDevice.id;}return;}
+  if(data.type==='hello'){if(data.device&&typeof data.device.id==='string'){remoteDevice={id:data.device.id,name:String(data.device.name||'Dispositivo')};$('trustCurrentBtn').disabled=false;$('remoteDeviceLabel').textContent=remoteDevice.name+' · '+remoteDevice.id;const token=settings?.peerTokens?.[remoteDevice.id];if(token)conn.send({type:'auth',deviceId:deviceInfo.id,token});}return;}
+  if(data.type==='auth'){const trusted=(settings?.trustedDevices||[]).find(x=>x.id===remoteDevice?.id);remoteAuthenticated=!!trusted&&!!trusted.token&&trusted.token===data.token&&data.deviceId===remoteDevice.id;if(!remoteAuthenticated)await window.transferAPI.diagnosticLog({level:'warning',event:'trusted-device-auth-failed',details:{deviceId:remoteDevice?.id||null}});return;}
+  if(data.type==='trust-grant'){if(typeof data.receiverId==='string'&&typeof data.token==='string'){await window.transferAPI.storePeerToken(data.receiverId,data.token);settings=await window.transferAPI.getSettings();toast('Autorização segura salva para este destinatário.');}return;}
   if(data.type==='file-start'){
     if(incoming){conn.send({type:'file-reject',id:data.id,reason:'busy'});return;}
     if(typeof data.id!=='string'||typeof data.name!=='string'||!Number.isSafeInteger(data.size)||data.size<0){conn.send({type:'file-reject',id:data.id,reason:'invalid'});return;}
-    const trusted=!!remoteDevice&&(settings.trustedDevices||[]).some(x=>x.id===remoteDevice.id);
+    const trusted=!!remoteAuthenticated&&(settings.trustedDevices||[]).some(x=>x.id===remoteDevice?.id);
     const target=await window.transferAPI.saveStart(data.name,trusted);
     if(!target){conn.send({type:'file-reject',id:data.id,reason:'cancelled'});toast('Recebimento cancelado.');return;}
     incoming={id:data.id,name:data.name,size:data.size,path:target.path,finalPath:target.finalPath,received:0,ui:row(data.name,data.size,'receive')};
@@ -115,7 +117,7 @@ async function autoSendFile(file){
   }catch(e){await window.transferAPI.diagnosticLog({level:'error',event:'automatic-send-failed',details:{file:file.name,message:e.message}});toast('Envio automático falhou: '+e.message);}finally{autoSending=false;}
 }
 $('copyId').onclick=async()=>{try{await navigator.clipboard.writeText(peer.id);toast('Código copiado.');}catch{toast('Não foi possível copiar o código.');}};
-$('trustCurrentBtn').onclick=async()=>{if(!remoteDevice)return;settings=await window.transferAPI.getSettings();settings.trustedDevices=await window.transferAPI.trustDevice(remoteDevice);renderTrusted();toast('Dispositivo confiável salvo. Próximos arquivos poderão ser recebidos automaticamente.');};
+$('trustCurrentBtn').onclick=async()=>{if(!remoteDevice)return;settings=await window.transferAPI.getSettings();const token=crypto.randomUUID()+crypto.randomUUID();settings.trustedDevices=await window.transferAPI.trustDevice(remoteDevice,token);remoteAuthenticated=true;if(conn?.open)conn.send({type:'trust-grant',receiverId:deviceInfo.id,token});renderTrusted();toast('Dispositivo confiável salvo com chave de autenticação. Próximos arquivos poderão ser recebidos automaticamente.');};
 function renderTrusted(){const host=$('trustedList');if(!host)return;host.innerHTML='';(settings?.trustedDevices||[]).forEach(d=>{const row=document.createElement('div');row.className='setting';const label=document.createElement('b');label.textContent=d.name+' · '+d.id;const btn=document.createElement('button');btn.className='secondary';btn.textContent='Remover';btn.onclick=async()=>{settings.trustedDevices=await window.transferAPI.untrustDevice(d.id);renderTrusted();};row.append(label,btn);host.appendChild(row);});}
 async function populateSettings(){
   settings=await window.transferAPI.getSettings();
