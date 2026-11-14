@@ -1,6 +1,6 @@
 {
   "name": "transferlab",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Transferência segura de arquivos entre dispositivos",
   "main": "src/main.js",
   "author": "TransferLab",
