@@ -8,7 +8,7 @@ let win;
 let watcher = null;
 const configPath = () => path.join(app.getPath('userData'), 'settings.json');
 const logFile = () => path.join(app.getPath('userData'), 'logs', 'transferlab.log');
-const defaults = () => ({ deviceId: crypto.randomUUID(), trustedDevices: [], receiveFolder: path.join(os.homedir(), 'Downloads', 'TransferLab'), monitorFolder: '', autoTargetPeerId: '', autoStart: false });
+const defaults = () => ({ deviceId: crypto.randomUUID(), trustedDevices: [], peerTokens: {}, receiveFolder: path.join(os.homedir(), 'Downloads', 'TransferLab'), monitorFolder: '', autoTargetPeerId: '', autoStart: false });
 async function readConfig() {
   try { const stored = JSON.parse(await fs.promises.readFile(configPath(), 'utf8')); return { ...defaults(), ...stored }; }
   catch { const initial = defaults(); await fs.promises.mkdir(path.dirname(configPath()), { recursive: true }); await fs.promises.writeFile(configPath(), JSON.stringify(initial, null, 2), 'utf8'); return initial; }
@@ -49,11 +49,12 @@ ipcMain.handle('save-settings', async (_e, patch) => {
   app.setLoginItemSettings({ openAtLogin: !!c.autoStart });
   return c;
 });
-ipcMain.handle('trust-device', async (_e, device) => {
+ipcMain.handle('store-peer-token', async (_e, receiverId, token) => { const c = await readConfig(); const peerTokens = { ...(c.peerTokens || {}), [String(receiverId)]: String(token) }; await writeConfig({ peerTokens }); return true; });
+ipcMain.handle('trust-device', async (_e, device, token) => {
   if (!device || typeof device.id !== 'string' || !device.id || device.id.length > 100) throw new Error('Identificação inválida.');
   const c = await readConfig();
   const list = (c.trustedDevices || []).filter(x => x.id !== device.id);
-  list.push({ id: device.id, name: String(device.name || 'Dispositivo').slice(0, 100), addedAt: new Date().toISOString() });
+  list.push({ id: device.id, name: String(device.name || 'Dispositivo').slice(0, 100), token: String(token || ''), addedAt: new Date().toISOString() });
   await writeConfig({ trustedDevices: list });
   await appendLog({ level: 'info', event: 'trusted-device-added', details: { deviceId: device.id } });
   return list;
