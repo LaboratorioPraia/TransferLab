@@ -54,23 +54,39 @@ function renderFiles(){$('selectedFiles').textContent=files.length?files.map(f=>
 $('sendBtn').onclick=async()=>{if(!conn?.open||!remoteDevice)return toast('Conecte e aguarde a identificação do outro dispositivo.');$('sendBtn').disabled=true;try{for(const file of files)await sendFile(file,conn);files=[];renderFiles();}catch(e){console.error(e);await log('error','transfer-failed',{message:e.message,stack:e.stack});toast('Transferência interrompida: '+e.message);}finally{renderFiles();}};
 async function sendFile(file,connection){
  if(!connection?.open||connection!==conn)throw new Error('Conexão indisponível.');
- const id=crypto.randomUUID(),ui=row(file.name,file.size,'send');expectedSizes.set(id,file.size);
- const accepted=waitFor(pendingAccept,id,90000);safeSend(connection,{type:'file-start',protocol:4,id,name:file.name,size:file.size});
- if(!(await accepted)){expectedSizes.delete(id);ui.pct.textContent='Sem confirmação';ui.meta.textContent=fmt(file.size)+' · Receptor não confirmou';throw new Error('O receptor não confirmou o início do arquivo em 90 segundos.');}
- let offset=0;
- while(offset<file.size){
-  if(!connection.open||connection!==conn)throw new Error('Conexão perdida durante o envio.');
-  const length=Math.min(CHUNK,file.size-offset),chunk=await window.transferAPI.readChunk(file.path,offset,length,{size:file.size,mtimeMs:file.mtimeMs});
-  if(!chunk?.byteLength)throw new Error('Falha ao ler arquivo de origem em '+offset+' bytes.');
-  const key=id+':'+offset,ack=waitFor(pendingChunk,key,45000);
-  safeSend(connection,{type:'file-chunk',protocol:4,id,offset,data:encodeBase64(chunk)});
-  if(!(await ack))throw new Error('O receptor não confirmou o bloco iniciado em '+offset+' bytes.');
-  offset+=chunk.byteLength;const pct=Math.floor(offset/file.size*100);ui.bar.style.width=pct+'%';ui.pct.textContent=pct+'%';ui.meta.textContent=fmt(file.size)+' · Blocos gravados e confirmados';
+ const id=crypto.randomUUID(),ui=row(file.name,file.size,'send');
+ expectedSizes.set(id,file.size);
+ try{
+  const accepted=waitFor(pendingAccept,id,90000);
+  safeSend(connection,{type:'file-start',protocol:4,id,name:file.name,size:file.size});
+  if(!(await accepted))throw new Error('O receptor não confirmou o início do arquivo em 90 segundos.');
+  let offset=0;
+  while(offset<file.size){
+   if(!connection.open||connection!==conn)throw new Error('Conexão perdida durante o envio.');
+   const length=Math.min(CHUNK,file.size-offset);
+   const chunk=await window.transferAPI.readChunk(file.path,offset,length,{size:file.size,mtimeMs:file.mtimeMs});
+   if(!chunk?.byteLength)throw new Error('Falha ao ler arquivo de origem em '+offset+' bytes.');
+   const key=id+':'+offset,ack=waitFor(pendingChunk,key,45000);
+   safeSend(connection,{type:'file-chunk',protocol:4,id,offset,data:encodeBase64(chunk)});
+   if(!(await ack))throw new Error('O receptor não confirmou o bloco iniciado em '+offset+' bytes.');
+   offset+=chunk.byteLength;
+   const pct=file.size?Math.floor(offset/file.size*100):100;
+   ui.bar.style.width=pct+'%';ui.pct.textContent=pct+'%';ui.meta.textContent=fmt(file.size)+' · Blocos gravados e confirmados';
+  }
+  const completed=waitFor(pendingComplete,id,90000);
+  safeSend(connection,{type:'file-end',protocol:4,id});
+  if(!(await completed))throw new Error('O receptor não confirmou a gravação final; arquivo não será considerado enviado.');
+  ui.bar.style.width='100%';ui.pct.textContent='100%';ui.meta.textContent=fmt(file.size)+' · Recebimento confirmado pelo destino';
+  await log('info','transfer-sent-confirmed',{name:file.name,size:file.size,remoteDeviceId:remoteDevice?.id||null});
+ }catch(error){
+  if(connection?.open){try{safeSend(connection,{type:'file-abort',protocol:4,id,reason:String(error.message||error).slice(0,300)});}catch{}}
+  ui.pct.textContent='Falha';ui.meta.textContent=fmt(file.size)+' · Envio interrompido';
+  throw error;
+ }finally{
+  expectedSizes.delete(id);
+  for(const map of [pendingAccept,pendingComplete]){const resolve=map.get(id);if(resolve)resolve(false);}
+  for(const [key,resolve] of pendingChunk){if(key.startsWith(id+':'))resolve(false);}
  }
- const completed=waitFor(pendingComplete,id,90000);safeSend(connection,{type:'file-end',protocol:4,id});
- if(!(await completed))throw new Error('O receptor não confirmou a gravação final; arquivo não será considerado enviado.');
- ui.bar.style.width='100%';ui.pct.textContent='100%';ui.meta.textContent=fmt(file.size)+' · Recebimento confirmado pelo destino';
- await log('info','transfer-sent-confirmed',{name:file.name,size:file.size,remoteDeviceId:remoteDevice?.id||null});
 }
 async function handleData(data,connection){
  if(!data||typeof data!=='object')return;
@@ -93,6 +109,10 @@ async function handleData(data,connection){
  }
  if(data.type==='trust-grant'){
   if(typeof data.receiverId==='string'&&typeof data.token==='string'){await window.transferAPI.storePeerToken(data.receiverId,data.token);settings=await window.transferAPI.getSettings();toast('Autorização segura salva para o destino.');}
+  return;
+ }
+ if(data.type==='file-abort'){
+  if(incoming&&data.id===incoming.id){const current=incoming;incoming=null;await window.transferAPI.saveAbort(current.path);current.ui.pct.textContent='Cancelado';current.ui.meta.textContent=fmt(current.size)+' · Remetente interrompeu o envio';await log('warning','transfer-aborted-by-sender',{name:current.name,reason:data.reason||'unknown'});}
   return;
  }
  if(data.type==='file-start'){
