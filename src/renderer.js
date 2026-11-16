@@ -1,4 +1,7 @@
-const CHUNK = 16 * 1024;
+// PeerJS JSON serialization expands binary data to Base64. Keep each payload
+// comfortably below the DataChannel/PeerJS JSON message limit.
+const CHUNK = 8 * 1024;
+window.transferProtocolInfo = { version: 4, chunkBytes: CHUNK, encoding: 'base64-json', acknowledgedChunks: true };
 const PEER_OPTIONS = { host: '0.peerjs.com', port: 443, path: '/', secure: true, debug: 1, config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] } };
 let peer=null, conn=null, files=[], incoming=null, deviceInfo=null, settings=null, remoteDevice=null, remoteAuthenticated=false;
 let transfers=0, receiveQueue=Promise.resolve(), autoQueue=Promise.resolve(), reconnectTimer=null;
