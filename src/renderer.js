@@ -18,7 +18,7 @@ function waitFor(map,id,timeout=45000){return new Promise(resolve=>{const timer=
 function resolvePending(map,key,value){const fn=map.get(key);if(fn)fn(value);}
 function rejectPending(reason){for(const map of [pendingAccept,pendingComplete,pendingChunk]){for(const resolve of map.values())resolve(false);map.clear();}expectedSizes.clear();if(reason)toast(reason);}
 function safeSend(connection,message){if(!connection||!connection.open)throw new Error('Canal de dados fechado.');connection.send(message);}
-function sendHello(connection){try{safeSend(connection,{type:'hello',protocol:3,device:{id:deviceInfo.id,name:deviceInfo.name,version:deviceInfo.version}});}catch(e){log('warning','hello-send-failed',{message:e.message});}}
+function sendHello(connection){try{safeSend(connection,{type:'hello',protocol:4,device:{id:deviceInfo.id,name:deviceInfo.name,version:deviceInfo.version}});}catch(e){log('warning','hello-send-failed',{message:e.message});}}
 async function init(){
  try{
   deviceInfo=await window.transferAPI.deviceInfo();settings=await window.transferAPI.getSettings();
@@ -33,9 +33,9 @@ async function init(){
   peer.on('disconnected',()=>{$('connectionState').textContent='Sinalização desconectada; tentando reconectar…';log('warning','peer-disconnected',{});if(peer&&!peer.destroyed&&!reconnectTimer)reconnectTimer=setTimeout(()=>{reconnectTimer=null;try{peer.reconnect();}catch(e){log('error','peer-reconnect-failed',{message:e.message});}},2500);});
   peer.on('close',()=>{$('connectionState').textContent='Serviço de conexão encerrado';log('error','peer-closed',{});});
   setTimeout(()=>{if(peer&&!peer.open&&!peer.destroyed){$('connectionState').textContent='Servidor não respondeu. Código permanente preservado; verifique internet/firewall.';log('warning','peer-open-timeout',{peerId:deviceInfo.id,server:'0.peerjs.com'});}},15000);
+  window.transferAPI.onFolderFileReady(file=>{autoQueue=autoQueue.then(()=>autoSendFileNow(file)).catch(e=>log('error','auto-queue-failed',{message:e.message}));});
   const watch=await window.transferAPI.startFolderWatch().catch(e=>({ok:false,reason:e.message}));
   if(!watch.ok&&settings.monitorFolder)log('warning','folder-watch-not-started',{reason:watch.reason||'unknown'});
-  window.transferAPI.onFolderFileReady(file=>{autoQueue=autoQueue.then(()=>autoSendFileNow(file)).catch(e=>log('error','auto-queue-failed',{message:e.message}));});
  }catch(e){console.error(e);$('connectionState').textContent='Falha ao iniciar aplicativo';toast('Não foi possível iniciar: '+e.message);log('error','startup-failed',{message:e.message,stack:e.stack});}
 }
 function attach(connection){
@@ -60,7 +60,7 @@ async function sendFile(file,connection){
  let offset=0;
  while(offset<file.size){
   if(!connection.open||connection!==conn)throw new Error('Conexão perdida durante o envio.');
-  const length=Math.min(CHUNK,file.size-offset),chunk=await window.transferAPI.readChunk(file.path,offset,length);
+  const length=Math.min(CHUNK,file.size-offset),chunk=await window.transferAPI.readChunk(file.path,offset,length,{size:file.size,mtimeMs:file.mtimeMs});
   if(!chunk?.byteLength)throw new Error('Falha ao ler arquivo de origem em '+offset+' bytes.');
   const key=id+':'+offset,ack=waitFor(pendingChunk,key,45000);
   safeSend(connection,{type:'file-chunk',protocol:3,id,offset,data:encodeBase64(chunk)});
@@ -76,12 +76,12 @@ async function handleData(data,connection){
  if(!data||typeof data!=='object')return;
  if(data.type==='hello'){
   if(data.device&&typeof data.device.id==='string'){
-   remoteDevice={id:data.device.id,name:String(data.device.name||'Dispositivo'),version:data.device.version||null};
+   remoteDevice={id:data.device.id,name:String(data.device.name||'Dispositivo'),version:data.device.version||null,protocol:data.protocol||null};
    $('remoteDeviceLabel').textContent=remoteDevice.name+' · '+remoteDevice.id;
    $('trustCurrentBtn').disabled=false;
    safeSend(connection,{type:'hello-ack',protocol:3,deviceId:deviceInfo.id});
    const token=settings?.peerTokens?.[remoteDevice.id];if(token)safeSend(connection,{type:'auth',protocol:3,deviceId:deviceInfo.id,token});
-   log('info','remote-device-identified',{deviceId:remoteDevice.id,name:remoteDevice.name,protocol:data.protocol||null});
+   renderFiles();setConnected(!!connection.open);log('info','remote-device-identified',{deviceId:remoteDevice.id,name:remoteDevice.name,protocol:data.protocol||null});
   }return;
  }
  if(data.type==='hello-ack'){log('info','remote-hello-ack',{deviceId:data.deviceId||null});return;}
