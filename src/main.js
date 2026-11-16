@@ -79,7 +79,7 @@ ipcMain.handle('start-folder-watch', async () => {
   watcher = fs.watch(c.monitorFolder, { persistent: true }, async (_event, filename) => {
     if (!filename) return;
     const fileName = filename.toString();
-    if (/\\.(part|tmp|temp|crdownload|download)$/i.test(fileName) || fileName.startsWith('~')) return;
+    if (/\.(part|tmp|temp|crdownload|download|partial)$/i.test(fileName) || fileName.startsWith('~') || fileName.startsWith('.')) return;
     const full = path.join(c.monitorFolder, fileName);
     if (watchPending.has(full)) return;
     watchPending.add(full);
