@@ -86,15 +86,16 @@ ipcMain.handle('start-folder-watch', async () => {
     try {
       const stat = await fs.promises.stat(full);
       if (!stat.isFile()) return;
-      let previous = -1, stable = 0;
-      for (let i = 0; i < 300 && stable < 30; i++) {
+      let previous = '', stable = 0;
+      for (let i = 0; i < 300 && stable < 15; i++) {
         await new Promise(resolve => setTimeout(resolve, 1000));
         const current = await fs.promises.stat(full);
         if (!current.isFile()) return;
-        if (current.size === previous) stable++; else stable = 0;
-        previous = current.size;
+        const signatureNow = current.size + ':' + current.mtimeMs;
+        if (signatureNow === previous) stable++; else stable = 0;
+        previous = signatureNow;
       }
-      if (stable < 30) { await appendLog({ level: 'warning', event: 'monitored-file-never-stabilized', details: { file: path.basename(full) } }); return; }
+      if (stable < 15) { await appendLog({ level: 'warning', event: 'monitored-file-never-stabilized', details: { file: path.basename(full) } }); return; }
       const finalStat = await fs.promises.stat(full);
       const signature = finalStat.size + ':' + finalStat.mtimeMs;
       if (watchDelivered.get(full) === signature) return;
@@ -105,7 +106,7 @@ ipcMain.handle('start-folder-watch', async () => {
       await handle.close();
       if (afterRead.size !== finalStat.size || afterRead.mtimeMs !== finalStat.mtimeMs) { await appendLog({ level: 'warning', event: 'monitored-file-changed-during-read-check', details: { file: path.basename(full) } }); return; }
       watchDelivered.set(full, signature);
-      if (win && !win.isDestroyed()) win.webContents.send('folder-file-ready', { path: full, name: path.basename(full), size: finalStat.size });
+      if (win && !win.isDestroyed()) win.webContents.send('folder-file-ready', { path: full, name: path.basename(full), size: finalStat.size, mtimeMs: finalStat.mtimeMs });
       await appendLog({ level: 'info', event: 'monitored-file-ready', details: { file: path.basename(full) } });
     } catch (e) { await appendLog({ level: 'warning', event: 'folder-watch-file-error', details: { file: path.basename(full), message: e.message } }); }
     finally { watchPending.delete(full); }
@@ -115,12 +116,18 @@ ipcMain.handle('start-folder-watch', async () => {
 ipcMain.handle('pick-files', async () => {
   const r = await dialog.showOpenDialog(win, { properties: ['openFile', 'multiSelections'] });
   if (r.canceled) return [];
-  return r.filePaths.map(p => ({ path: p, name: path.basename(p), size: fs.statSync(p).size }));
+  return r.filePaths.map(p => { const stat = fs.statSync(p); return { path: p, name: path.basename(p), size: stat.size, mtimeMs: stat.mtimeMs }; });
 });
-ipcMain.handle('read-chunk', async (_e, filePath, offset, length) => {
+ipcMain.handle('read-chunk', async (_e, filePath, offset, length, expected = null) => {
   const fd = await fs.promises.open(filePath, 'r');
-  try { const b = Buffer.alloc(length); const { bytesRead } = await fd.read(b, 0, length, offset); return b.subarray(0, bytesRead); }
-  finally { await fd.close(); }
+  try {
+    const before = await fd.stat();
+    if (expected && (before.size !== expected.size || before.mtimeMs !== expected.mtimeMs)) throw new Error('O arquivo de origem mudou depois de ser selecionado ou estabilizado. Selecione-o novamente após a gravação terminar.');
+    const b = Buffer.alloc(length); const { bytesRead } = await fd.read(b, 0, length, offset);
+    const after = await fd.stat();
+    if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error('O arquivo de origem foi alterado durante a leitura. Envio cancelado para evitar arquivo incompleto.');
+    return b.subarray(0, bytesRead);
+  } finally { await fd.close(); }
 });
 ipcMain.handle('save-start', async (_e, name, autoReceive) => {
   const safe = String(name || 'arquivo').replace(/[\\/:*?"<>|\x00-\x1F]/g, '_').slice(0, 180) || 'arquivo';
