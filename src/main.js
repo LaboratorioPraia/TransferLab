@@ -78,26 +78,32 @@ ipcMain.handle('start-folder-watch', async () => {
   await fs.promises.access(c.monitorFolder, fs.constants.R_OK);
   watcher = fs.watch(c.monitorFolder, { persistent: true }, async (_event, filename) => {
     if (!filename) return;
-    const full = path.join(c.monitorFolder, filename.toString());
+    const fileName = filename.toString();
+    if (/\\.(part|tmp|temp|crdownload|download)$/i.test(fileName) || fileName.startsWith('~')) return;
+    const full = path.join(c.monitorFolder, fileName);
     if (watchPending.has(full)) return;
     watchPending.add(full);
     try {
       const stat = await fs.promises.stat(full);
       if (!stat.isFile()) return;
       let previous = -1, stable = 0;
-      for (let i = 0; i < 120 && stable < 10; i++) {
+      for (let i = 0; i < 300 && stable < 30; i++) {
         await new Promise(resolve => setTimeout(resolve, 1000));
         const current = await fs.promises.stat(full);
         if (!current.isFile()) return;
         if (current.size === previous) stable++; else stable = 0;
         previous = current.size;
       }
-      if (stable < 10) { await appendLog({ level: 'warning', event: 'monitored-file-never-stabilized', details: { file: path.basename(full) } }); return; }
+      if (stable < 30) { await appendLog({ level: 'warning', event: 'monitored-file-never-stabilized', details: { file: path.basename(full) } }); return; }
       const finalStat = await fs.promises.stat(full);
       const signature = finalStat.size + ':' + finalStat.mtimeMs;
       if (watchDelivered.get(full) === signature) return;
       const handle = await fs.promises.open(full, 'r');
+      const probe = Buffer.alloc(1);
+      if (finalStat.size > 0) await handle.read(probe, 0, 1, 0);
+      const afterRead = await handle.stat();
       await handle.close();
+      if (afterRead.size !== finalStat.size || afterRead.mtimeMs !== finalStat.mtimeMs) { await appendLog({ level: 'warning', event: 'monitored-file-changed-during-read-check', details: { file: path.basename(full) } }); return; }
       watchDelivered.set(full, signature);
       if (win && !win.isDestroyed()) win.webContents.send('folder-file-ready', { path: full, name: path.basename(full), size: finalStat.size });
       await appendLog({ level: 'info', event: 'monitored-file-ready', details: { file: path.basename(full) } });
