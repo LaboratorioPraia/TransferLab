@@ -1,41 +1,36 @@
 (() => {
-  const log = async (level,event,details) => { try { await window.transferAPI.diagnosticLog({level,event,details}); } catch {} };
-  window.addEventListener('error',e=>log('error','window-error',{message:e.message,source:e.filename,line:e.lineno,column:e.colno}));
-  window.addEventListener('unhandledrejection',e=>log('error','unhandled-rejection',{reason:String(e.reason?.stack||e.reason||'unknown')}));
-  const check=(name,ok,detail)=>({name,status:ok?'OK':'FALHA',ok:!!ok,detail:String(detail||'')});
-  window.runTransferLabDiagnostics=async(peer,conn)=>{
-    const results=[];
-    results.push(check('Interface carregada',!!document.getElementById('sendBtn'),'Componentes principais encontrados.'));
-    results.push(check('API segura do aplicativo',!!window.transferAPI?.deviceInfo,'Preload / IPC disponível.'));
-    results.push(check('Biblioteca PeerJS',typeof window.Peer==='function',typeof window.Peer));
-    results.push(check('Internet disponível',navigator.onLine,navigator.onLine?'Navegador informa conexão ativa.':'Sem conexão de rede detectada.'));
-    results.push(check('WebRTC no navegador',!!(window.RTCPeerConnection||window.webkitRTCPeerConnection),'Suporte necessário para conexão direta.'));
-    let device=null,local=null,logs=[];
-    try{device=await window.transferAPI.deviceInfo();results.push(check('Identificação do dispositivo',!!device?.name&&!!device?.id,device?.name+' · '+device?.version));}
-    catch(e){results.push(check('Identificação do dispositivo',false,e.message));}
-    try{
-      local=await window.transferAPI.diagnosticSelfTest();
-      results.push(check('Gravação/leitura temporária',local.tempWriteReadDelete,local.tempError||'Teste de escrita, leitura e exclusão.'));
-      results.push(check('Pasta de dados',local.userDataWritable,local.userDataError||'Acesso de escrita validado.'));
-      results.push(check('Gravação de logs',local.logWritable,local.logError||'Log local gravável.'));
-    }catch(e){results.push(check('Testes locais do Windows',false,e.message));}
-    results.push(check('Sessão PeerJS',!!peer?.open&&!peer?.destroyed,peer?.id||'Sem sessão ativa; verifique internet/firewall.'));
-    results.push(check('Conexão com outro dispositivo',!!conn?.open,conn?.open?'Canal aberto.':'Nenhum dispositivo conectado.'));
-    results.push(check('Canal WebRTC',!!conn?.dataChannel&&conn.dataChannel.readyState==='open',conn?.dataChannel?.readyState||'Canal indisponível.'));
-    try{logs=await window.transferAPI.diagnosticReadLogs();}catch(e){logs=[{level:'error',event:'read-logs-failed',details:e.message}];}
-    const failed=results.filter(x=>!x.ok).length;
-    const report={product:'TransferLab',version:device?.version||'0.1.2',reportVersion:2,generatedAt:new Date().toISOString(),app:device||{},localTests:local||{},userAgent:navigator.userAgent,network:{online:navigator.onLine,peerId:peer?.id||null,peerOpen:!!peer?.open,connectionOpen:!!conn?.open,dataChannelState:conn?.dataChannel?.readyState||'indisponível'},summary:{total:results.length,passed:results.length-failed,failed},checks:results,logs};
-    await log(failed?'warning':'info','diagnostic-completed',report.summary);
-    const host=document.getElementById('diagnosticResults');
-    if(host){host.innerHTML='';results.forEach(item=>{const row=document.createElement('div');row.className='diagnostic-row';const label=document.createElement('b');label.textContent=item.name;const status=document.createElement('span');status.className=item.ok?'diag-ok':'diag-fail';status.textContent=item.status;const detail=document.createElement('small');detail.textContent=item.detail;row.append(label,status,detail);host.appendChild(row);});}
-    const summary=document.getElementById('diagnosticSummary');
-    if(summary)summary.textContent=failed?failed+' de '+results.length+' verificações falharam. Exporte e envie o relatório.':'Testes locais aprovados. A transferência real ainda deve ser validada entre dois PCs.';
-    const exportButton=document.getElementById('exportDiagnostic');
-    if(exportButton)exportButton.onclick=async()=>{try{const result=await window.transferAPI.exportDiagnosticReport(report);if(!result.canceled)alert('Relatório salvo: '+result.path);}catch(e){alert('Falha ao exportar: '+e.message);}};
-    return report;
-  };
-  document.addEventListener('DOMContentLoaded',()=>{
-    const button=document.getElementById('runDiagnostics');
-    if(button)button.addEventListener('click',async()=>{button.disabled=true;button.textContent='Analisando...';try{await window.runTransferLabDiagnostics(window.transferPeer,window.transferConnection);}finally{button.disabled=false;button.textContent='Executar autodiagnóstico';}});
-  });
+ const log=async(level,event,details)=>{try{await window.transferAPI.diagnosticLog({level,event,details});}catch{}};
+ window.addEventListener('error',event=>log('error','renderer-error',{message:event.message,source:event.filename,line:event.lineno,column:event.colno}));
+ window.addEventListener('unhandledrejection',event=>log('error','unhandled-rejection',{reason:String(event.reason?.stack||event.reason||'unknown')}));
+ const check=(name,ok,detail)=>({name,status:ok?'OK':'FALHA',ok:!!ok,detail:String(detail||'')});
+ let lastReport=null;
+ window.runTransferLabDiagnostics=async(peer,connection)=>{
+  const checks=[];let device=null,local=null,logs=[];
+  checks.push(check('Interface carregada',!!document.getElementById('sendBtn'),'Elementos essenciais da interface.'));
+  checks.push(check('API segura do Electron',!!window.transferAPI?.deviceInfo,'Preload e IPC.'));
+  checks.push(check('Biblioteca PeerJS',typeof window.Peer==='function',typeof window.Peer));
+  checks.push(check('Internet detectada',navigator.onLine,navigator.onLine?'Navegador informa conexão ativa.':'Sem conexão de rede.'));
+  checks.push(check('Suporte WebRTC',!!(window.RTCPeerConnection||window.webkitRTCPeerConnection),'API RTCPeerConnection.'));
+  try{device=await window.transferAPI.deviceInfo();checks.push(check('UUID permanente',!!device?.id,device?.id||'Não foi possível ler o identificador.'));}catch(e){checks.push(check('UUID permanente',false,e.message));}
+  try{local=await window.transferAPI.diagnosticSelfTest();checks.push(check('Disco temporário',local.tempWriteReadDelete,local.tempError||'Escrita, leitura e exclusão.'));checks.push(check('Pasta de dados',local.userDataWritable,local.userDataError||'Acesso à pasta de dados.'));checks.push(check('Arquivo de log',local.logWritable,local.logError||'Log gravável.'));}catch(e){checks.push(check('Testes locais',false,e.message));}
+  checks.push(check('Servidor de sinalização PeerJS',!!peer?.open&&!peer?.destroyed,peer?.open?'Sessão registrada: '+(peer.id||'sem ID'):'Não registrado; veja peerjs-error nos logs.'));
+  checks.push(check('Conexão remota',!!connection?.open,connection?.open?'Conexão PeerJS aberta.':'Nenhuma conexão aberta.'));
+  const channelState=connection?.dataChannel?.readyState||'indisponível';
+  checks.push(check('DataChannel WebRTC',channelState==='open','Estado: '+channelState));
+  const pc=connection?.peerConnection||connection?._peerConnection||null;
+  checks.push(check('Estado ICE',!!pc?.iceConnectionState&&['connected','completed'].includes(pc.iceConnectionState),'Estado ICE: '+(pc?.iceConnectionState||'não exposto pela versão PeerJS/API')));
+  let settings=null;try{settings=await window.transferAPI.getSettings();}catch{}
+  try{logs=await window.transferAPI.diagnosticReadLogs();}catch(e){logs=[{level:'error',event:'read-logs-failed',details:e.message}];}
+  const failed=checks.filter(item=>!item.ok).length;
+  lastReport={product:'TransferLab',version:device?.version||'0.1.3',reportVersion:3,generatedAt:new Date().toISOString(),app:device||{},localTests:local||{},network:{online:navigator.onLine,peerId:peer?.id||null,peerOpen:!!peer?.open,connectionOpen:!!connection?.open,dataChannelState:channelState,iceConnectionState:pc?.iceConnectionState||null,remotePeerId:connection?.peer||null},configuration:{receiveFolderConfigured:!!settings?.receiveFolder,monitorFolderConfigured:!!settings?.monitorFolder,autoTargetConfigured:!!settings?.autoTargetPeerId,trustedDeviceCount:settings?.trustedDevices?.length||0},summary:{total:checks.length,passed:checks.length-failed,failed},checks,logs};
+  await log(failed?'warning':'info','diagnostic-completed',lastReport.summary);
+  const host=document.getElementById('diagnosticResults');if(host){host.innerHTML='';checks.forEach(item=>{const row=document.createElement('div');row.className='diagnostic-row';const label=document.createElement('b');label.textContent=item.name;const status=document.createElement('span');status.className=item.ok?'diag-ok':'diag-fail';status.textContent=item.status;const detail=document.createElement('small');detail.textContent=item.detail;row.append(label,status,detail);host.appendChild(row);});}
+  const summary=document.getElementById('diagnosticSummary');if(summary)summary.textContent=failed?failed+' de '+checks.length+' verificações falharam. Exporte o JSON e envie para análise.':'Verificações locais aprovadas. Faça também um teste real entre dois computadores.';
+  return lastReport;
+ };
+ document.addEventListener('DOMContentLoaded',()=>{
+  const run=document.getElementById('runDiagnostics'),exportButton=document.getElementById('exportDiagnostic');
+  if(run)run.addEventListener('click',async()=>{run.disabled=true;run.textContent='Analisando…';try{await window.runTransferLabDiagnostics(window.transferPeer,window.transferConnection);}catch(e){await log('error','diagnostic-execution-failed',{message:e.message,stack:e.stack});alert('Falha no diagnóstico: '+e.message);}finally{run.disabled=false;run.textContent='Executar autodiagnóstico';}});
+  if(exportButton)exportButton.addEventListener('click',async()=>{try{if(!lastReport)await window.runTransferLabDiagnostics(window.transferPeer,window.transferConnection);const result=await window.transferAPI.exportDiagnosticReport(lastReport);if(!result.canceled)alert('Relatório salvo em: '+result.path);}catch(e){alert('Falha ao exportar o relatório: '+e.message);}});
+ });
 })();
