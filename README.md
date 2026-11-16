@@ -1,47 +1,36 @@
-# TransferLab 0.1.2 — versão de testes
+# TransferLab 0.1.3 — versão de validação
 
-Aplicativo Windows para transferência de arquivos entre PCs pela internet usando PeerJS/WebRTC DataChannel.
+Aplicativo Windows para transferência de arquivos entre PCs por PeerJS/WebRTC DataChannel.
 
-## Correções e recursos desta versão
-- Identidade permanente do dispositivo para que o código não mude a cada abertura.
-- Confirmação de recebimento por bloco: o remetente só avança depois que o receptor confirma a gravação daquele bloco.
-- Processamento sequencial dos dados recebidos para impedir concorrência entre gravações.
-- Arquivo recebido primeiro em extensão temporária .part e movido para o nome final somente após validar o tamanho.
-- Evita sobrescrita automática: cria sufixos (1), (2) etc.
-- Pareamento de dispositivo confiável com chave compartilhada aleatória; o receptor só faz recebimento sem diálogo após autenticar o dispositivo.
-- Pasta padrão de recebimento para dispositivos autenticados.
-- Monitoramento de uma pasta para envio automático ao dispositivo permanente configurado.
-- Antes de enviar automaticamente, aguarda dez intervalos consecutivos de tamanho estável e verifica se o arquivo pode ser aberto para leitura.
-- Opção para iniciar com o Windows.
-- Autodiagnóstico com exportação de relatório JSON e logs técnicos.
+## Alterações desta versão
+- UUID permanente mostrado localmente antes da conexão com o servidor de sinalização.
+- Estados separados para identificação local, sinalização e canal de dados.
+- Handshake bilateral de identificação; o aplicativo não presume que a conexão está pronta apenas porque o PeerJS abriu.
+- Blocos menores (16 KiB), com confirmação do receptor somente depois da gravação no disco.
+- O remetente só mostra 100% após confirmação de gravação final pelo destino.
+- Erros de conexão, sinalização, autenticação e transferência registrados no log técnico.
+- Autorização de dispositivo confiável e recebimento automático na pasta padrão.
+- Monitoramento aguarda 30 verificações consecutivas de tamanho estável (30 segundos), testa leitura e confirma que o arquivo não mudou durante a verificação.
+- Ignora arquivos temporários comuns (.part, .tmp, .temp, .crdownload, .download).
+- Diagnóstico exportável com UUID, estado PeerJS, DataChannel, ICE quando exposto pela biblioteca, configuração local e logs recentes.
 
-## Como configurar recebimento automático
-1. Instale e abra o TransferLab nos dois PCs.
-2. No PC que receberá os arquivos, abra a tela Dispositivos.
-3. No PC remetente, conecte usando o código permanente do PC receptor.
-4. No receptor, clique em “Confiar neste dispositivo”. Uma chave aleatória é compartilhada pela conexão criptografada.
-5. Na tela Configurações do receptor, selecione a pasta padrão de recebimento.
-6. Os próximos arquivos daquele dispositivo confiável serão salvos nessa pasta sem abrir diálogo.
+## Configuração de recebimento automático
+1. Instale e abra o TransferLab nos dois computadores.
+2. No computador que receberá, escolha a pasta padrão em Configurações.
+3. Conecte o computador remetente ao UUID permanente exibido no receptor.
+4. No computador receptor, abra Dispositivos e clique em “Confiar neste dispositivo” para autorizar o remetente.
+5. No computador remetente, escolha a pasta monitorada, informe o UUID permanente do receptor e salve.
 
-## Como configurar envio automático
-1. No PC remetente, abra Configurações.
-2. Escolha a pasta monitorada.
-3. Informe o código permanente do PC receptor.
-4. Salve as configurações.
-5. No receptor, o PC remetente precisa estar cadastrado como confiável.
+A autorização deve ser feita no computador que receberá, pois é ele que decide quais remetentes podem gravar automaticamente.
 
-O monitor aguarda o tamanho permanecer igual por dez intervalos consecutivos de um segundo. Também tenta abrir o arquivo para leitura. Se não estabilizar em até 120 segundos, o arquivo não será enviado. Para arquivos que programas deixam temporariamente parados antes de continuar escrevendo, aumente esse intervalo em versão futura ou mantenha o envio manual.
+## Monitoramento de pasta
+O monitoramento aguarda 30 segundos consecutivos sem alteração do tamanho, tenta abrir o arquivo para leitura e confere novamente tamanho e data de modificação. Arquivos que não estabilizarem em até 5 minutos não serão enviados. Arquivos temporários comuns são ignorados. Isso reduz o risco de enviar arquivos ainda em gravação, mas nenhum teste genérico consegue garantir que um programa não fará uma nova gravação depois de uma pausa longa; para fluxos críticos, configure o programa gerador para gravar primeiro com extensão temporária e renomear para a extensão final somente quando concluir.
 
 ## Diagnóstico
-Em Configurações, clique “Executar autodiagnóstico” e depois “Exportar relatório JSON”. O relatório inclui estado de rede, sessão PeerJS, canal WebRTC, testes de escrita/leitura e logs recentes. Envie o JSON quando houver falha.
+Em Configurações, clique em “Executar autodiagnóstico” e depois em “Exportar relatório JSON”. O relatório inclui verificações locais, sessão PeerJS, DataChannel, estado ICE quando disponível e logs recentes. O UUID permanente é preservado mesmo se o servidor de sinalização estiver fora do ar.
 
-## Limitações importantes
-- A conectividade depende do WebRTC e do servidor público de sinalização PeerJS. Redes com NAT/firewall restritivo podem impedir conexão; ainda não há servidor TURN próprio.
-- A conexão e o transporte WebRTC são criptografados, mas esta versão ainda não tem serviço de retransmissão TURN nem infraestrutura própria de identidade.
-- O monitoramento atual observa arquivos diretamente dentro da pasta selecionada; subpastas não são monitoradas recursivamente.
-- O monitoramento requer que o TransferLab permaneça aberto. O recebimento automático exige que o receptor esteja aberto e acessível.
-- Ainda não há retomada automática de transferências interrompidas.
-- Use esta versão para testes controlados antes de confiar arquivos críticos.
+## Limitações de rede
+O servidor público PeerJS é usado para sinalização; os arquivos trafegam diretamente pelo WebRTC. STUN auxilia a descoberta de rotas, mas não substitui TURN. Redes com NAT simétrico, firewall corporativo ou bloqueio UDP podem impedir a conexão direta. Esta versão não inclui servidor TURN próprio nem retransmissão de arquivos. Nesses cenários, o diagnóstico deverá indicar falha de canal/ICE; não será correto afirmar que a transferência funciona em toda e qualquer rede.
 
 ## Desenvolvimento
 Requer Node.js 22.
@@ -51,5 +40,3 @@ npm install
 npm start
 npm run dist
 ```
-
-O workflow GitHub Actions valida a sintaxe dos arquivos JavaScript e compila o instalador Windows.
