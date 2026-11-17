@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('transferAPI', {
   pickFolder: () => ipcRenderer.invoke('pick-folder'),
   startFolderWatch: () => ipcRenderer.invoke('start-folder-watch'),
   onFolderFileReady: callback => { ipcRenderer.removeAllListeners('folder-file-ready'); ipcRenderer.on('folder-file-ready', (_event, file) => callback(file)); },
+  folderFileResult: (file, success) => ipcRenderer.invoke('folder-file-result', file, success),
   pickFiles: () => ipcRenderer.invoke('pick-files'),
   readChunk: (p, o, l, expected) => ipcRenderer.invoke('read-chunk', p, o, l, expected),
   hashFile: (p, expected) => ipcRenderer.invoke('hash-file', p, expected),
