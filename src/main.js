@@ -49,6 +49,7 @@ function createTray() {
 function createWindow() {
   win = new BrowserWindow({ width: 1180, height: 820, minWidth: 900, minHeight: 640, backgroundColor: '#edf2f5', show: false, frame: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  win.setMenu(null);
   win.loadFile(path.join(__dirname, 'index.html'));
   win.once('ready-to-show', () => { if (!process.argv.includes('--hidden')) win.show(); });
   win.on('close', event => { if (!isQuitting) { event.preventDefault(); win.hide(); } });
