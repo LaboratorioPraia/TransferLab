@@ -15,9 +15,9 @@ const watchPending = new Set();
 const watchDelivered = new Map();
 const configPath = () => path.join(app.getPath('userData'), 'settings.json');
 const logFile = () => path.join(app.getPath('userData'), 'logs', 'transferlab.log');
-const defaults = () => ({ deviceId: crypto.randomUUID(), trustedDevices: [], peerTokens: {}, receiveFolder: path.join(os.homedir(), 'Downloads', 'TransferLab'), monitorFolder: '', autoTargetPeerId: '', autoStart: true });
+const defaults = () => ({ deviceId: crypto.randomUUID(), trustedDevices: [], peerTokens: {}, receiveFolder: path.join(os.homedir(), 'Downloads', 'TransferLab'), monitorFolder: '', autoTargetPeerId: '', autoStart: true, settingsVersion: 2 });
 async function readConfig() {
-  try { const stored = JSON.parse(await fs.promises.readFile(configPath(), 'utf8')); return { ...defaults(), ...stored }; }
+  try { const stored = JSON.parse(await fs.promises.readFile(configPath(), 'utf8')); const merged = { ...defaults(), ...stored }; if ((stored.settingsVersion || 0) < 2) { merged.autoStart = true; merged.settingsVersion = 2; await fs.promises.writeFile(configPath(), JSON.stringify(merged, null, 2), 'utf8'); } return merged; }
   catch { const initial = defaults(); await fs.promises.mkdir(path.dirname(configPath()), { recursive: true }); await fs.promises.writeFile(configPath(), JSON.stringify(initial, null, 2), 'utf8'); return initial; }
 }
 async function writeConfig(patch) {
