@@ -1,40 +1,56 @@
-# TransferLab 0.1.5 — versão de correção e validação
+# TransferLab 0.2.0 — atualização de interface e execução contínua
 
 Aplicativo Windows para transferência de arquivos entre computadores usando PeerJS/WebRTC DataChannel.
 
-## Correções incluídas nesta versão
-- Corrigido o filtro de extensões temporárias da pasta monitorada: .part, .tmp, .temp, .crdownload, .download e .partial.
-- Arquivos ocultos e nomes iniciados por "~" são ignorados pelo monitoramento.
-- A pasta monitorada exige 15 intervalos consecutivos de tamanho e data de modificação estáveis (aproximadamente 15 segundos) antes de liberar um arquivo.
-- O remetente valida tamanho e data de modificação do arquivo em cada leitura de bloco. Se o arquivo mudar depois de selecionado ou durante o envio, a leitura falha em vez de enviar conteúdo possivelmente incompleto.
-- Os metadados de modificação são transportados da seleção e do monitoramento para a rotina de envio.
-- O handshake e as mensagens de transferência passam a anunciar protocolo 4 de forma consistente.
-- A interface atualiza o estado do botão de envio após identificar o dispositivo remoto.
-- O listener da pasta monitorada é registrado antes de iniciar o watcher para reduzir a possibilidade de perder o primeiro evento.
-- Versão do instalador e do relatório de diagnóstico atualizadas para 0.1.5.
+## Principais melhorias
+- Nova interface clean/neumórfica, com fundo claro, cartões arredondados, sombras suaves e destaque azul.
+- Janela principal sem moldura e sem barra de menu superior.
+- Fechar/ocultar a janela mantém o aplicativo na bandeja do Windows; o menu da bandeja permite reabrir ou sair completamente.
+- Inicialização automática habilitada por padrão em instalações novas. A opção continua configurável em Configurações.
+- Instância única para evitar conflitos com o identificador permanente do dispositivo.
+- Monitoramento de pasta ativo enquanto o aplicativo está em execução, com eventos do sistema de arquivos e varredura periódica para recuperar eventos perdidos.
+- Arquivos existentes são registrados como linha de base ao iniciar o monitoramento; não são reenviados só porque o aplicativo reiniciou. Arquivos novos ou modificados entram no fluxo de estabilidade.
+- Arquivos monitorados precisam manter tamanho e data de modificação estáveis por aproximadamente 30 segundos antes de serem liberados.
+- Verificação SHA-256 do arquivo de origem e do arquivo recebido antes da confirmação final. O destino não publica o arquivo final se o tamanho ou hash não corresponder.
+- Diálogo independente, centralizado e visualmente consistente para envio e recebimento, com progresso em tempo real.
+- O preload agora encaminha os metadados esperados ao processo principal em cada leitura de bloco, mantendo a validação de tamanho e modificação.
 
-## Configuração de recebimento automático
-1. Instale a mesma versão do TransferLab nos dois computadores.
-2. No computador receptor, configure a pasta padrão em Configurações.
-3. Conecte o computador remetente ao código permanente exibido no receptor.
-4. No receptor, autorize o remetente em Dispositivos.
-5. No remetente, selecione a pasta monitorada, informe o código permanente do receptor e salve.
+## Instalador universal
+O workflow compila dois pacotes:
+- Windows x64: Electron 35.
+- Windows x86 (32 bits): Electron 22.3.27, última linha do Electron com suporte à arquitetura ia32.
 
-A autorização é concedida no computador que recebe. O receptor continua responsável por escolher quais dispositivos podem gravar automaticamente.
+Um pequeno instalador NSIS detecta a arquitetura do Windows e abre o instalador correspondente. O usuário recebe um único arquivo `TransferLab-Setup-0.2.0.exe`.
 
-## Proteção de arquivos ainda em gravação
-O monitoramento aguarda estabilidade do tamanho e do horário de modificação por aproximadamente 15 segundos e verifica novamente os metadados antes de liberar o arquivo. Durante o envio, cada bloco é lido com validação dos mesmos metadados. Se o programa que gerou o arquivo continuar gravando, o envio será interrompido em vez de continuar com uma cópia inconsistente.
+**Observação importante sobre 32 bits:** o pacote x86 precisa usar Electron 22, uma versão antiga e sem suporte de segurança upstream. Ele é necessário para compatibilidade com sistemas Windows 32 bits, mas não oferece o mesmo nível de atualizações de segurança do pacote x64 baseado em Electron 35. Para uso conectado à internet, recomendamos Windows 64 bits sempre que o hardware permitir. O build x86 precisa passar pela compilação e por testes em um Windows 32 bits real antes de ser considerado homologado.
 
-Nenhum intervalo de estabilidade genérico pode garantir que um programa não volte a gravar um arquivo após uma pausa longa. Para fluxos críticos, configure o programa gerador para gravar primeiro com extensão temporária e renomear para a extensão final somente quando concluir.
+## Segundo plano e monitoramento
+- Fechar a janela principal apenas a oculta; o aplicativo continua ativo na bandeja.
+- Para encerrar completamente, use o menu da bandeja e escolha “Sair completamente”.
+- A inicialização automática é registrada nas configurações de login do Windows.
+- O monitoramento permanece ativo enquanto o processo do TransferLab estiver rodando. Ele não pode monitorar com o computador desligado, em suspensão profunda ou após o usuário encerrar o processo.
 
-## Diagnóstico
-Em Configurações, clique em “Executar autodiagnóstico” e depois em “Exportar relatório JSON”. O relatório inclui verificações locais, estado PeerJS, DataChannel, estado ICE quando exposto pela biblioteca e logs recentes.
+## Proteção contra arquivos ainda em construção
+O monitoramento aguarda 30 segundos consecutivos sem alteração de tamanho ou data de modificação, verifica se o arquivo pode ser lido e depois calcula SHA-256. O remetente transmite o hash; o receptor calcula novamente antes de renomear o arquivo temporário para o nome final. Se os valores divergirem, o arquivo parcial é descartado e o remetente não recebe confirmação.
 
-## Limitações de rede conhecidas
-A sinalização usa o servidor público PeerJS (0.peerjs.com) e os arquivos trafegam diretamente pelo WebRTC. STUN auxilia a descoberta de rotas, mas não substitui TURN. Redes com NAT simétrico, firewall corporativo ou bloqueio UDP podem impedir uma conexão direta. Esta versão ainda não inclui servidor TURN próprio nem retransmissão de arquivos. Portanto, não se deve prometer funcionamento em toda rede sem um teste real no ambiente de destino.
+Nenhum tempo fixo de estabilidade garante que um programa não volte a escrever depois de uma pausa longa. Para fluxos críticos, configure o programa gerador para salvar com extensão temporária e renomear para a extensão final somente após concluir. A validação SHA-256 protege a integridade dos bytes recebidos, mas não determina se o programa de origem já concluiu logicamente o documento.
+
+## Testes necessários antes de uso geral
+1. Instalar em Windows 64 bits e confirmar a inicialização automática.
+2. Fechar a janela e verificar que o ícone permanece na bandeja.
+3. Reiniciar o Windows e confirmar que o TransferLab inicia oculto.
+4. Testar envio manual de arquivo pequeno e arquivo grande entre dois computadores.
+5. Testar pasta monitorada com arquivo sendo gravado lentamente, incluindo pausa de gravação superior a 30 segundos.
+6. Confirmar que o receptor só publica arquivos com SHA-256 correspondente.
+7. Testar o instalador universal em uma máquina Windows 32 bits física ou virtual.
+
+A compilação bem-sucedida não substitui os testes de transferência entre dois computadores e o teste de instalação em Windows 32 bits.
+
+## Rede
+A sinalização usa o servidor público PeerJS (0.peerjs.com) e os arquivos trafegam diretamente pelo WebRTC. STUN auxilia a descoberta de rotas, mas não substitui TURN. Redes com NAT simétrico, firewall corporativo ou bloqueio UDP podem impedir uma conexão direta. Esta versão ainda não inclui servidor TURN próprio nem retransmissão de arquivos; portanto, não é correto prometer conexão em toda rede.
 
 ## Desenvolvimento
-Requer Node.js 22.
+Requer Node.js 22 no ambiente de desenvolvimento.
 
 ```bash
 npm install
