@@ -156,14 +156,16 @@ async function waitForRemote(targetId,timeout=45000){
  const started=Date.now();while(Date.now()-started<timeout){if(conn?.open&&remoteDevice?.id===targetId)return true;if(conn&&(conn.open||conn.opening)&&remoteDevice&&remoteDevice.id!==targetId)throw new Error('Outro dispositivo está conectado.');await new Promise(resolve=>setTimeout(resolve,250));}throw new Error('O destino não concluiu a identificação dentro do prazo.');
 }
 async function autoSendFileNow(file){
- if(!settings?.monitorFolder||!settings?.autoTargetPeerId)return;
+ let success=false;
  try{
+  if(!settings?.monitorFolder||!settings?.autoTargetPeerId)throw new Error('Configure a pasta monitorada e o dispositivo de destino.');
   const target=settings.autoTargetPeerId;
   if(!conn?.open){if(conn&&(conn.open||conn.opening))throw new Error('Há outra conexão em andamento.');if(!peer?.open)throw new Error('Serviço de sinalização indisponível.');attach(peer.connect(target,{reliable:true,serialization:'json'}));}
   await waitForRemote(target);
   if(remoteDevice?.id!==target)throw new Error('O dispositivo conectado não corresponde ao destino configurado.');
-  toast('Enviando automaticamente: '+file.name);await sendFile(file,conn);toast('Envio automático confirmado: '+file.name);
+  toast('Enviando automaticamente: '+file.name);await sendFile(file,conn);success=true;toast('Envio automático confirmado: '+file.name);
  }catch(e){await log('error','automatic-send-failed',{file:file.name,message:e.message});toast('Envio automático falhou: '+e.message);}
+ finally{try{await window.transferAPI.folderFileResult(file,success);}catch(e){await log('error','folder-file-ack-failed',{message:e.message});}}
 }
 $('minimizeWindow').onclick=()=>window.transferAPI.windowControl('minimize');
 $('hideWindow').onclick=()=>window.transferAPI.windowControl('hide');
