@@ -35,7 +35,7 @@ async function appendLog(entry) {
 }
 function createTray() {
   if (tray) return;
-  const icon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAKElEQVQ4T2NkoBAwUqifgXH///8ZGBgY/jMwMDAw4gMGBgYGBgYGAB8bAhH3z8e7AAAAAElFTkSuQmCC');
+  const icon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAyklEQVR4nM2XwQ2DMAxFU4sdyhrtTjAU3amsUaYop0goiZM4+vnBR4z8HrYVBecGxyOXfC2/PwKyf2aVk0ygwDUiwoJrtaX0Qm8J0RIsiWgE7BDnuF/vwzPv0QFkfLfnOAEPt0jABEJorQRM4L0e0bMaCegIWiTgS2iVmHLFrBtdqpWSo50DKThVQOtmdgSadQuM1gELHC5ghUMFWuBQgRBWuz9dTkLL8lJOwqJA7t7eKzzzPjciZheuLNESDHgk0FsiVXv4z+nwOAEWq1k+NuvrygAAAABJRU5ErkJggg==');
   tray = new Tray(icon);
   tray.setToolTip('TransferLab — monitoramento ativo');
   tray.setContextMenu(Menu.buildFromTemplate([
