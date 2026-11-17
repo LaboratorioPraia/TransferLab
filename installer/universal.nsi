@@ -10,8 +10,8 @@ Section "Install TransferLab"
   SetShellVarContext current
   InitPluginsDir
   SetOutPath "$PLUGINSDIR"
-  File "installer\payload\TransferLab-Setup-0.2.0-x64.exe"
-  File "installer\payload\TransferLab-Setup-0.2.0-x86.exe"
+  File "${__FILEDIR__}\payload\TransferLab-Setup-0.2.0-x64.exe"
+  File "${__FILEDIR__}\payload\TransferLab-Setup-0.2.0-x86.exe"
   ${If} ${RunningX64}
     DetailPrint "Windows 64 bits detectado. Iniciando instalador x64..."
     ExecWait '"$PLUGINSDIR\TransferLab-Setup-0.2.0-x64.exe"' $0
