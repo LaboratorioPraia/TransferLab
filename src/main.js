@@ -75,14 +75,16 @@ function showTransferDialog(payload) {
   if (payload.done || payload.failed) setTimeout(() => { if (transferDialog && !transferDialog.isDestroyed()) transferDialog.close(); }, 4500);
 }
 const singleInstance = app.requestSingleInstanceLock();
-if (!singleInstance) app.quit();
-
+if (!singleInstance) {
+  app.quit();
+} else {
 app.whenReady().then(async () => {
   const cfg = await readConfig();
   app.setLoginItemSettings({ openAtLogin: cfg.autoStart !== false, args: ['--hidden'] });
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
+}
 app.on('second-instance', () => { if (win) { win.show(); win.focus(); } });
 app.on('before-quit', () => { isQuitting = true; if (watcher) { watcher.close(); watcher = null; } if (watcherPoll) { clearInterval(watcherPoll); watcherPoll = null; } if (tray) { tray.destroy(); tray = null; } });
 app.on('window-all-closed', () => {});
