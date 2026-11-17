@@ -56,6 +56,8 @@ async function sendFile(file,connection){
  if(!connection?.open||connection!==conn)throw new Error('Conexão indisponível.');
  const id=crypto.randomUUID(),ui=row(file.name,file.size,'send');
  expectedSizes.set(id,file.size);
+ const sha256=await window.transferAPI.hashFile(file.path,{size:file.size,mtimeMs:file.mtimeMs});
+ window.transferAPI.transferDialog({direction:'send',name:file.name,detail:fmt(file.size),percent:0,status:'Aguardando confirmação'}).catch(()=>{});
  try{
   const accepted=waitFor(pendingAccept,id,90000);
   safeSend(connection,{type:'file-start',protocol:4,id,name:file.name,size:file.size});
@@ -71,16 +73,16 @@ async function sendFile(file,connection){
    if(!(await ack))throw new Error('O receptor não confirmou o bloco iniciado em '+offset+' bytes.');
    offset+=chunk.byteLength;
    const pct=file.size?Math.floor(offset/file.size*100):100;
-   ui.bar.style.width=pct+'%';ui.pct.textContent=pct+'%';ui.meta.textContent=fmt(file.size)+' · Blocos gravados e confirmados';
+   ui.bar.style.width=pct+'%';ui.pct.textContent=pct+'%';ui.meta.textContent=fmt(file.size)+' · Blocos gravados e confirmados';window.transferAPI.transferDialog({direction:'send',name:file.name,detail:fmt(file.size),percent:pct,status:'Enviando com verificação de integridade'}).catch(()=>{});
   }
   const completed=waitFor(pendingComplete,id,90000);
-  safeSend(connection,{type:'file-end',protocol:4,id});
+  safeSend(connection,{type:'file-end',protocol:4,id,sha256});
   if(!(await completed))throw new Error('O receptor não confirmou a gravação final; arquivo não será considerado enviado.');
-  ui.bar.style.width='100%';ui.pct.textContent='100%';ui.meta.textContent=fmt(file.size)+' · Recebimento confirmado pelo destino';
+  ui.bar.style.width='100%';ui.pct.textContent='100%';ui.meta.textContent=fmt(file.size)+' · Recebimento confirmado pelo destino';window.transferAPI.transferDialog({direction:'send',name:file.name,detail:fmt(file.size),percent:100,status:'Enviado e validado',done:true}).catch(()=>{});
   await log('info','transfer-sent-confirmed',{name:file.name,size:file.size,remoteDeviceId:remoteDevice?.id||null});
  }catch(error){
   if(connection?.open){try{safeSend(connection,{type:'file-abort',protocol:4,id,reason:String(error.message||error).slice(0,300)});}catch{}}
-  ui.pct.textContent='Falha';ui.meta.textContent=fmt(file.size)+' · Envio interrompido';
+  ui.pct.textContent='Falha';ui.meta.textContent=fmt(file.size)+' · Envio interrompido';window.transferAPI.transferDialog({direction:'send',name:file.name,detail:fmt(file.size),percent:0,status:error.message||'Falha no envio',failed:true}).catch(()=>{});
   throw error;
  }finally{
   expectedSizes.delete(id);
@@ -112,7 +114,7 @@ async function handleData(data,connection){
   return;
  }
  if(data.type==='file-abort'){
-  if(incoming&&data.id===incoming.id){const current=incoming;incoming=null;await window.transferAPI.saveAbort(current.path);current.ui.pct.textContent='Cancelado';current.ui.meta.textContent=fmt(current.size)+' · Remetente interrompeu o envio';await log('warning','transfer-aborted-by-sender',{name:current.name,reason:data.reason||'unknown'});}
+  if(incoming&&data.id===incoming.id){const current=incoming;incoming=null;await window.transferAPI.saveAbort(current.path);current.ui.pct.textContent='Cancelado';current.ui.meta.textContent=fmt(current.size)+' · Remetente interrompeu o envio';window.transferAPI.transferDialog({direction:'receive',name:current.name,detail:fmt(current.size),percent:0,status:'Envio cancelado pelo remetente',failed:true}).catch(()=>{});await log('warning','transfer-aborted-by-sender',{name:current.name,reason:data.reason||'unknown'});}
   return;
  }
  if(data.type==='file-start'){
@@ -122,6 +124,7 @@ async function handleData(data,connection){
   const target=await window.transferAPI.saveStart(data.name,trusted);
   if(!target){safeSend(connection,{type:'file-reject',id:data.id,reason:'cancelled'});toast('Recebimento cancelado.');return;}
   incoming={id:data.id,name:data.name,size:data.size,path:target.path,finalPath:target.finalPath,received:0,ui:row(data.name,data.size,'receive')};
+  window.transferAPI.transferDialog({direction:'receive',name:data.name,detail:fmt(data.size),percent:0,status:'Recebendo arquivo'}).catch(()=>{});
   safeSend(connection,{type:'file-accept',id:data.id});await log('info','transfer-accepted',{name:data.name,size:data.size,autoReceive:trusted});return;
  }
  if(data.type==='file-accept'){resolvePending(pendingAccept,data.id,true);return;}
@@ -135,16 +138,16 @@ async function handleData(data,connection){
   const buffer=decodeBase64(data.data);
   if(data.offset!==incoming.received||incoming.received+buffer.byteLength>incoming.size){safeSend(connection,{type:'file-chunk-ack',id:data.id,offset:data.offset,ok:false});throw new Error('Bloco fora de ordem ou tamanho inválido.');}
   await window.transferAPI.saveChunk(incoming.path,buffer,data.offset);incoming.received+=buffer.byteLength;
-  const pct=incoming.size?Math.floor(incoming.received/incoming.size*100):100;incoming.ui.bar.style.width=pct+'%';incoming.ui.pct.textContent=pct+'%';incoming.ui.meta.textContent=fmt(incoming.size)+' · Gravado no disco';
+  const pct=incoming.size?Math.floor(incoming.received/incoming.size*100):100;incoming.ui.bar.style.width=pct+'%';incoming.ui.pct.textContent=pct+'%';incoming.ui.meta.textContent=fmt(incoming.size)+' · Gravado no disco';window.transferAPI.transferDialog({direction:'receive',name:incoming.name,detail:fmt(incoming.size),percent:pct,status:'Recebendo e gravando'}).catch(()=>{});
   safeSend(connection,{type:'file-chunk-ack',id:data.id,offset:data.offset,ok:true,received:incoming.received});return;
  }
  if(data.type==='file-chunk-ack'){resolvePending(pendingChunk,data.id+':'+data.offset,!!data.ok);return;}
  if(data.type==='file-end'){
   if(!incoming||data.id!==incoming.id)return;const current=incoming;
   if(current.received!==current.size){safeSend(connection,{type:'file-reject',id:current.id,reason:'size-mismatch'});await window.transferAPI.saveAbort(current.path);current.ui.pct.textContent='Falha';incoming=null;return;}
-  const result=await window.transferAPI.saveFinish(current.path,current.finalPath,current.size);
-  if(result.ok&&result.size===current.size){current.ui.bar.style.width='100%';current.ui.pct.textContent='100%';current.ui.meta.textContent=fmt(result.size)+' · Recebido e gravado';safeSend(connection,{type:'file-complete',id:current.id,size:result.size});toast('Arquivo recebido e confirmado: '+current.name);await window.transferAPI.diagnosticLog({level:'info',event:'transfer-received-confirmed',details:{name:current.name,size:result.size,path:result.path}});}
-  else{safeSend(connection,{type:'file-reject',id:current.id,reason:'write-failed'});current.ui.pct.textContent='Falha';}
+  const result=await window.transferAPI.saveFinish(current.path,current.finalPath,current.size,data.sha256);
+  if(result.ok&&result.size===current.size){current.ui.bar.style.width='100%';current.ui.pct.textContent='100%';current.ui.meta.textContent=fmt(result.size)+' · Recebido e validado (SHA-256)';window.transferAPI.transferDialog({direction:'receive',name:current.name,detail:fmt(result.size),percent:100,status:'Recebido e validado',done:true}).catch(()=>{});safeSend(connection,{type:'file-complete',id:current.id,size:result.size});toast('Arquivo recebido e confirmado: '+current.name);await window.transferAPI.diagnosticLog({level:'info',event:'transfer-received-confirmed',details:{name:current.name,size:result.size,path:result.path}});}
+  else{safeSend(connection,{type:'file-reject',id:current.id,reason:result.reason||'write-failed'});current.ui.pct.textContent='Falha';window.transferAPI.transferDialog({direction:'receive',name:current.name,detail:fmt(current.size),percent:0,status:'Falha na validação do arquivo',failed:true}).catch(()=>{});}
   incoming=null;return;
  }
  if(data.type==='file-complete'){const expected=expectedSizes.get(data.id);expectedSizes.delete(data.id);resolvePending(pendingComplete,data.id,Number(data.size)===expected);return;}
