@@ -1,7 +1,7 @@
 !include "LogicLib.nsh"
 !include "x64.nsh"
 Name "TransferLab 0.2.0"
-OutFile "..\\TransferLab-Setup-0.2.0.exe"
+OutFile "..\TransferLab-Setup-0.2.0.exe"
 RequestExecutionLevel user
 Unicode true
 SilentInstall normal
@@ -10,8 +10,8 @@ Section "Install TransferLab"
   SetShellVarContext current
   InitPluginsDir
   SetOutPath "$PLUGINSDIR"
-  File "${__FILEDIR__}\payload\TransferLab-Setup-0.2.0-x64.exe"
-  File "${__FILEDIR__}\payload\TransferLab-Setup-0.2.0-x86.exe"
+  File "payload\TransferLab-Setup-0.2.0-x64.exe"
+  File "payload\TransferLab-Setup-0.2.0-x86.exe"
   ${If} ${RunningX64}
     DetailPrint "Windows 64 bits detectado. Iniciando instalador x64..."
     ExecWait '"$PLUGINSDIR\TransferLab-Setup-0.2.0-x64.exe"' $0
