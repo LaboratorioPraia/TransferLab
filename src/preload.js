@@ -1,6 +1,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('transferAPI', {
   deviceInfo: () => ipcRenderer.invoke('device-info'),
+  windowControl: action => ipcRenderer.invoke('window-control', action),
+  transferDialog: payload => ipcRenderer.invoke('transfer-dialog', payload),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSettings: patch => ipcRenderer.invoke('save-settings', patch),
   trustDevice: (device, token) => ipcRenderer.invoke('trust-device', device, token),
@@ -10,7 +12,7 @@ contextBridge.exposeInMainWorld('transferAPI', {
   startFolderWatch: () => ipcRenderer.invoke('start-folder-watch'),
   onFolderFileReady: callback => { ipcRenderer.removeAllListeners('folder-file-ready'); ipcRenderer.on('folder-file-ready', (_event, file) => callback(file)); },
   pickFiles: () => ipcRenderer.invoke('pick-files'),
-  readChunk: (p, o, l) => ipcRenderer.invoke('read-chunk', p, o, l),
+  readChunk: (p, o, l, expected) => ipcRenderer.invoke('read-chunk', p, o, l, expected),
   saveStart: (name, autoReceive) => ipcRenderer.invoke('save-start', name, autoReceive),
   saveChunk: (p, b, o) => ipcRenderer.invoke('save-chunk', p, b, o),
   saveFinish: (p, finalPath, size) => ipcRenderer.invoke('save-finish', p, finalPath, size),
