@@ -131,7 +131,7 @@ ipcMain.handle('start-folder-watch', async () => {
       const stat = await fs.promises.stat(full);
       if (!stat.isFile()) return;
       let previous = '', stable = 0;
-      for (let i = 0; i < 300 && stable < 15; i++) {
+      for (let i = 0; i < 600 && stable < 30; i++) {
         await new Promise(resolve => setTimeout(resolve, 1000));
         const current = await fs.promises.stat(full);
         if (!current.isFile()) return;
@@ -190,6 +190,20 @@ ipcMain.handle('read-chunk', async (_e, filePath, offset, length, expected = nul
     return b.subarray(0, bytesRead);
   } finally { await fd.close(); }
 });
+ipcMain.handle('hash-file', async (_e, filePath, expected = null) => {
+  const before = await fs.promises.stat(filePath);
+  if (expected && (before.size !== expected.size || before.mtimeMs !== expected.mtimeMs)) throw new Error('O arquivo mudou antes da verificação de integridade.');
+  const hash = crypto.createHash('sha256');
+  await new Promise((resolve, reject) => {
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', chunk => hash.update(chunk));
+    stream.on('error', reject);
+    stream.on('end', resolve);
+  });
+  const after = await fs.promises.stat(filePath);
+  if (before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error('O arquivo mudou durante a verificação de integridade.');
+  return hash.digest('hex');
+});
 ipcMain.handle('save-start', async (_e, name, autoReceive) => {
   const safe = String(name || 'arquivo').replace(/[\\/:*?"<>|\x00-\x1F]/g, '_').slice(0, 180) || 'arquivo';
   const c = await readConfig();
@@ -219,9 +233,15 @@ ipcMain.handle('save-chunk', async (_e, filePath, buffer, position) => {
   finally { await fd.close(); }
   return true;
 });
-ipcMain.handle('save-finish', async (_e, filePath, finalPath, expectedSize) => {
+ipcMain.handle('save-finish', async (_e, filePath, finalPath, expectedSize, expectedHash) => {
   const stat = await fs.promises.stat(filePath);
-  if (stat.size !== expectedSize) return { ok: false, size: stat.size };
+  if (stat.size !== expectedSize) return { ok: false, size: stat.size, reason: 'size-mismatch' };
+  if (expectedHash) {
+    const hash = crypto.createHash('sha256');
+    await new Promise((resolve, reject) => { const stream = fs.createReadStream(filePath); stream.on('data', chunk => hash.update(chunk)); stream.on('error', reject); stream.on('end', resolve); });
+    const actualHash = hash.digest('hex');
+    if (actualHash !== expectedHash) return { ok: false, size: stat.size, reason: 'sha256-mismatch' };
+  }
   let destination = finalPath;
   if (fs.existsSync(destination)) { const ext = path.extname(finalPath), base = path.basename(finalPath, ext), dir = path.dirname(finalPath); let i = 1; while (fs.existsSync(destination)) destination = path.join(dir, base + ' (' + i++ + ')' + ext); }
   await fs.promises.rename(filePath, destination);
