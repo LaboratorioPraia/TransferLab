@@ -63,7 +63,8 @@ function showTransferDialog(payload) {
   }).replace(/</g, '\\u003c');
   const html = `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"><body style="margin:0;background:#edf2f5;font-family:Segoe UI,Arial;color:#202b3a"><main style="margin:18px;padding:24px 26px;border-radius:24px;background:#f7f9fb;box-shadow:12px 12px 28px #d5dde3,-12px -12px 28px #fff"><div style="font-size:10px;letter-spacing:2px;color:#8c9aaa">TRANSFERLAB · <span id="direction"></span></div><h2 id="name" style="font-size:19px;font-weight:600;margin:13px 0 6px;overflow-wrap:anywhere"></h2><div id="detail" style="font-size:12px;color:#8793a1;margin-bottom:22px"></div><div style="height:9px;border-radius:20px;background:#e2e7ed;overflow:hidden;box-shadow:inset 2px 2px 5px #cfd6de"><div id="bar" style="height:100%;width:0;background:linear-gradient(90deg,#3296ed,#3836f2);border-radius:20px;transition:width .2s"></div></div><div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px"><b id="status" style="font-size:12px;font-weight:500"></b><strong id="percent" style="font-size:15px;color:#3c55e8"></strong></div></main><script>function update(p){document.getElementById('direction').textContent=p.direction==='receive'?'RECEBENDO ARQUIVO':'ENVIANDO ARQUIVO';document.getElementById('name').textContent=p.name;document.getElementById('detail').textContent=p.detail;document.getElementById('bar').style.width=p.percent+'%';document.getElementById('percent').textContent=p.percent+'%';document.getElementById('status').textContent=p.status;}window.update=update;update(${safe});</script></body></html>`;
   if (!transferDialog || transferDialog.isDestroyed()) {
-    transferDialog = new BrowserWindow({ width: 470, height: 205, frame: false, resizable: false, movable: true, minimizable: false, maximizable: false, alwaysOnTop: true, show: false, backgroundColor: '#edf2f5', skipTaskbar: true, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true } });
+    const area = screen.getPrimaryDisplay().workArea;
+    transferDialog = new BrowserWindow({ x: Math.round(area.x + (area.width - 470) / 2), y: Math.round(area.y + (area.height - 205) / 2), width: 470, height: 205, frame: false, resizable: false, movable: true, minimizable: false, maximizable: false, alwaysOnTop: true, show: false, backgroundColor: '#edf2f5', skipTaskbar: true, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true } });
     transferDialog.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
     transferDialog.once('ready-to-show', () => transferDialog.show());
     transferDialog.on('closed', () => { transferDialog = null; });
@@ -73,6 +74,9 @@ function showTransferDialog(payload) {
   }
   if (payload.done || payload.failed) setTimeout(() => { if (transferDialog && !transferDialog.isDestroyed()) transferDialog.close(); }, 4500);
 }
+const singleInstance = app.requestSingleInstanceLock();
+if (!singleInstance) app.quit();
+
 app.whenReady().then(async () => {
   const cfg = await readConfig();
   app.setLoginItemSettings({ openAtLogin: cfg.autoStart !== false, args: ['--hidden'] });
@@ -120,6 +124,13 @@ ipcMain.handle('start-folder-watch', async () => {
   if (watcherPoll) { clearInterval(watcherPoll); watcherPoll = null; }
   if (!c.monitorFolder) return { ok: false, reason: 'Pasta monitorada não configurada.' };
   await fs.promises.access(c.monitorFolder, fs.constants.R_OK);
+  watchDelivered.clear();
+  const baseline = await fs.promises.readdir(c.monitorFolder, { withFileTypes: true });
+  for (const entry of baseline) {
+    if (!entry.isFile()) continue;
+    const full = path.join(c.monitorFolder, entry.name);
+    try { const stat = await fs.promises.stat(full); watchDelivered.set(full, stat.size + ':' + stat.mtimeMs); } catch {}
+  }
   watcher = fs.watch(c.monitorFolder, { persistent: true }, async (_event, filename) => {
     if (!filename) return;
     const fileName = filename.toString();
