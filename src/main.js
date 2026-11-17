@@ -170,6 +170,7 @@ ipcMain.handle('start-folder-watch', async () => {
     } catch (e) { await appendLog({ level: 'warning', event: 'folder-watch-file-error', details: { file: path.basename(full), message: e.message } }); }
     finally { if (!dispatched) watchPending.delete(full); }
   });
+  watcher.on('error', error => { appendLog({ level: 'error', event: 'folder-watcher-error', details: { message: error.message } }).catch(() => {}); });
   watcherPoll = setInterval(async () => {
     try {
       const entries = await fs.promises.readdir(c.monitorFolder, { withFileTypes: true });
