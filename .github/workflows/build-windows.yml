@@ -44,9 +44,10 @@ jobs:
       - name: Normalize installer name
         shell: pwsh
         run: |
-          $file = Get-ChildItem release -Filter *.exe | Select-Object -First 1
+          $file = Get-ChildItem release -Filter "TransferLab-Setup-0.2.0-*.exe" | Where-Object { $_.Name -notlike "*.__uninstaller.exe" } | Select-Object -First 1
           if (-not $file) { throw "Installer not found" }
-          Copy-Item $file.FullName "release/TransferLab-Setup-0.2.0-${{ matrix.arch }}.exe" -Force
+          $targetName = "TransferLab-Setup-0.2.0-${{ matrix.arch }}.exe"
+          if ($file.Name -ne $targetName) { Rename-Item $file.FullName $targetName -Force }
       - name: Upload architecture installer
         uses: actions/upload-artifact@v4
         with:
