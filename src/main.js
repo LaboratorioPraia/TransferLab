@@ -88,7 +88,7 @@ app.whenReady().then(async () => {
 });
 }
 app.on('second-instance', () => { if (win) { win.show(); win.focus(); } });
-app.on('before-quit', () => { isQuitting = true; if (watcher) { watcher.close(); watcher = null; } if (watcherPoll) { clearInterval(watcherPoll); watcherPoll = null; } if (tray) { tray.destroy(); tray = null; } });
+app.on('before-quit', () => { isQuitting = true; if (watcher) { watcher.close(); watcher = null; } if (watcherPoll) { clearInterval(watcherPoll); watcherPoll = null; } if (transferDialogTimer) { clearTimeout(transferDialogTimer); transferDialogTimer = null; } if (transferDialog && !transferDialog.isDestroyed()) transferDialog.close(); if (tray) { tray.destroy(); tray = null; } });
 app.on('window-all-closed', () => {});
 
 ipcMain.handle('window-control', async (_e, action) => { if (!win) return false; if (action === 'minimize') win.minimize(); else if (action === 'hide') win.hide(); else if (action === 'close') win.hide(); return true; });
