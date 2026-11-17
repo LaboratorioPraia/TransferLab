@@ -26,7 +26,7 @@
   checks.push(check('DataChannel WebRTC',channelState==='open','Estado: '+channelState));
   const pc=connection?.peerConnection||connection?._peerConnection||null;
   checks.push(check('Estado ICE',!!pc?.iceConnectionState&&['connected','completed'].includes(pc.iceConnectionState),'Estado ICE: '+(pc?.iceConnectionState||'não exposto pela versão PeerJS/API')));
-  try{logs=await window.transferAPI.diagnosticReadLogs();catch(e){logs=[{level:'error',event:'read-logs-failed',details:e.message}];}
+  try{logs=await window.transferAPI.diagnosticReadLogs();}catch(e){logs=[{level:'error',event:'read-logs-failed',details:e.message}];}
   const failed=checks.filter(item=>!item.ok).length;
   lastReport={product:'TransferLab',version:device?.version||'0.2.0',reportVersion:6,generatedAt:new Date().toISOString(),app:device||{},localTests:local||{},network:{online:navigator.onLine,peerId:peer?.id||null,peerOpen:!!peer?.open,connectionOpen:!!connection?.open,dataChannelState:channelState,iceConnectionState:pc?.iceConnectionState||null,remotePeerId:connection?.peer||null},configuration:{receiveFolderConfigured:!!settings?.receiveFolder,monitorFolderConfigured:!!settings?.monitorFolder,autoTargetConfigured:!!settings?.autoTargetPeerId,trustedDeviceCount:settings?.trustedDevices?.length||0},summary:{total:checks.length,passed:checks.length-failed,failed},checks,logs};
   await log(failed?'warning':'info','diagnostic-completed',lastReport.summary);
