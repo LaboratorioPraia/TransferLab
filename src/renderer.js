@@ -56,9 +56,9 @@ async function sendFile(file,connection){
  if(!connection?.open||connection!==conn)throw new Error('Conexão indisponível.');
  const id=crypto.randomUUID(),ui=row(file.name,file.size,'send');
  expectedSizes.set(id,file.size);
- const sha256=await window.transferAPI.hashFile(file.path,{size:file.size,mtimeMs:file.mtimeMs});
- window.transferAPI.transferDialog({direction:'send',name:file.name,detail:fmt(file.size),percent:0,status:'Aguardando confirmação'}).catch(()=>{});
+ window.transferAPI.transferDialog({direction:'send',name:file.name,detail:fmt(file.size),percent:0,status:'Verificando arquivo'}).catch(()=>{});
  try{
+  const sha256=await window.transferAPI.hashFile(file.path,{size:file.size,mtimeMs:file.mtimeMs});
   const accepted=waitFor(pendingAccept,id,90000);
   safeSend(connection,{type:'file-start',protocol:4,id,name:file.name,size:file.size});
   if(!(await accepted))throw new Error('O receptor não confirmou o início do arquivo em 90 segundos.');
@@ -147,7 +147,7 @@ async function handleData(data,connection){
   if(current.received!==current.size){safeSend(connection,{type:'file-reject',id:current.id,reason:'size-mismatch'});await window.transferAPI.saveAbort(current.path);current.ui.pct.textContent='Falha';incoming=null;return;}
   const result=await window.transferAPI.saveFinish(current.path,current.finalPath,current.size,data.sha256);
   if(result.ok&&result.size===current.size){current.ui.bar.style.width='100%';current.ui.pct.textContent='100%';current.ui.meta.textContent=fmt(result.size)+' · Recebido e validado (SHA-256)';window.transferAPI.transferDialog({direction:'receive',name:current.name,detail:fmt(result.size),percent:100,status:'Recebido e validado',done:true}).catch(()=>{});safeSend(connection,{type:'file-complete',id:current.id,size:result.size});toast('Arquivo recebido e confirmado: '+current.name);await window.transferAPI.diagnosticLog({level:'info',event:'transfer-received-confirmed',details:{name:current.name,size:result.size,path:result.path}});}
-  else{safeSend(connection,{type:'file-reject',id:current.id,reason:result.reason||'write-failed'});current.ui.pct.textContent='Falha';window.transferAPI.transferDialog({direction:'receive',name:current.name,detail:fmt(current.size),percent:0,status:'Falha na validação do arquivo',failed:true}).catch(()=>{});}
+  else{await window.transferAPI.saveAbort(current.path);safeSend(connection,{type:'file-reject',id:current.id,reason:result.reason||'write-failed'});current.ui.pct.textContent='Falha';window.transferAPI.transferDialog({direction:'receive',name:current.name,detail:fmt(current.size),percent:0,status:'Falha na validação do arquivo',failed:true}).catch(()=>{});}
   incoming=null;return;
  }
  if(data.type==='file-complete'){const expected=expectedSizes.get(data.id);expectedSizes.delete(data.id);resolvePending(pendingComplete,data.id,Number(data.size)===expected);return;}
