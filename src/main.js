@@ -7,6 +7,7 @@ const crypto = require('crypto');
 let win;
 let tray = null;
 let transferDialog = null;
+let transferDialogTimer = null;
 let isQuitting = false;
 let watcher = null;
 let watcherPoll = null;
@@ -54,6 +55,7 @@ function createWindow() {
   createTray();
 }
 function showTransferDialog(payload) {
+  if (transferDialogTimer) { clearTimeout(transferDialogTimer); transferDialogTimer = null; }
   const safe = JSON.stringify({
     direction: payload.direction === 'receive' ? 'receive' : 'send',
     name: String(payload.name || 'Arquivo').slice(0, 180),
@@ -72,7 +74,7 @@ function showTransferDialog(payload) {
     transferDialog.webContents.executeJavaScript('window.update(' + safe + ')').catch(() => {});
     if (!transferDialog.isVisible()) transferDialog.show();
   }
-  if (payload.done || payload.failed) setTimeout(() => { if (transferDialog && !transferDialog.isDestroyed()) transferDialog.close(); }, 4500);
+  if (payload.done || payload.failed) transferDialogTimer = setTimeout(() => { if (transferDialog && !transferDialog.isDestroyed()) transferDialog.close(); transferDialogTimer = null; }, 4500);
 }
 const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) {
