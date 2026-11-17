@@ -1,16 +1,20 @@
-const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
 
 let win;
+let tray = null;
+let transferDialog = null;
+let isQuitting = false;
 let watcher = null;
+let watcherPoll = null;
 const watchPending = new Set();
 const watchDelivered = new Map();
 const configPath = () => path.join(app.getPath('userData'), 'settings.json');
 const logFile = () => path.join(app.getPath('userData'), 'logs', 'transferlab.log');
-const defaults = () => ({ deviceId: crypto.randomUUID(), trustedDevices: [], peerTokens: {}, receiveFolder: path.join(os.homedir(), 'Downloads', 'TransferLab'), monitorFolder: '', autoTargetPeerId: '', autoStart: false });
+const defaults = () => ({ deviceId: crypto.randomUUID(), trustedDevices: [], peerTokens: {}, receiveFolder: path.join(os.homedir(), 'Downloads', 'TransferLab'), monitorFolder: '', autoTargetPeerId: '', autoStart: true });
 async function readConfig() {
   try { const stored = JSON.parse(await fs.promises.readFile(configPath(), 'utf8')); return { ...defaults(), ...stored }; }
   catch { const initial = defaults(); await fs.promises.mkdir(path.dirname(configPath()), { recursive: true }); await fs.promises.writeFile(configPath(), JSON.stringify(initial, null, 2), 'utf8'); return initial; }
@@ -28,27 +32,66 @@ async function appendLog(entry) {
   await fs.promises.mkdir(path.dirname(file), { recursive: true });
   await fs.promises.appendFile(file, JSON.stringify({ at: new Date().toISOString(), ...entry }) + '\n', 'utf8');
 }
+function createTray() {
+  if (tray) return;
+  const icon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAKElEQVQ4T2NkoBAwUqifgXH///8ZGBgY/jMwMDAw4gMGBgYGBgYGAB8bAhH3z8e7AAAAAElFTkSuQmCC');
+  tray = new Tray(icon);
+  tray.setToolTip('TransferLab — monitoramento ativo');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Abrir TransferLab', click: () => { if (win) { win.show(); win.focus(); } } },
+    { label: 'Status: em segundo plano', enabled: false },
+    { type: 'separator' },
+    { label: 'Sair completamente', click: () => { isQuitting = true; app.quit(); } }
+  ]));
+  tray.on('double-click', () => { if (win) { win.show(); win.focus(); } });
+}
 function createWindow() {
-  win = new BrowserWindow({ width: 1180, height: 820, minWidth: 900, minHeight: 640, backgroundColor: '#ffffff', show: false,
+  win = new BrowserWindow({ width: 1180, height: 820, minWidth: 900, minHeight: 640, backgroundColor: '#edf2f5', show: false, frame: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   win.loadFile(path.join(__dirname, 'index.html'));
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => { if (!process.argv.includes('--hidden')) win.show(); });
+  win.on('close', event => { if (!isQuitting) { event.preventDefault(); win.hide(); } });
+  createTray();
+}
+function showTransferDialog(payload) {
+  const safe = JSON.stringify({
+    direction: payload.direction === 'receive' ? 'receive' : 'send',
+    name: String(payload.name || 'Arquivo').slice(0, 180),
+    detail: String(payload.detail || ''),
+    percent: Math.max(0, Math.min(100, Number(payload.percent) || 0)),
+    status: String(payload.status || 'Em andamento').slice(0, 100)
+  }).replace(/</g, '\\u003c');
+  const html = `<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"><body style="margin:0;background:#edf2f5;font-family:Segoe UI,Arial;color:#202b3a"><main style="margin:18px;padding:24px 26px;border-radius:24px;background:#f7f9fb;box-shadow:12px 12px 28px #d5dde3,-12px -12px 28px #fff"><div style="font-size:10px;letter-spacing:2px;color:#8c9aaa">TRANSFERLAB · <span id="direction"></span></div><h2 id="name" style="font-size:19px;font-weight:600;margin:13px 0 6px;overflow-wrap:anywhere"></h2><div id="detail" style="font-size:12px;color:#8793a1;margin-bottom:22px"></div><div style="height:9px;border-radius:20px;background:#e2e7ed;overflow:hidden;box-shadow:inset 2px 2px 5px #cfd6de"><div id="bar" style="height:100%;width:0;background:linear-gradient(90deg,#3296ed,#3836f2);border-radius:20px;transition:width .2s"></div></div><div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px"><b id="status" style="font-size:12px;font-weight:500"></b><strong id="percent" style="font-size:15px;color:#3c55e8"></strong></div></main><script>function update(p){document.getElementById('direction').textContent=p.direction==='receive'?'RECEBENDO ARQUIVO':'ENVIANDO ARQUIVO';document.getElementById('name').textContent=p.name;document.getElementById('detail').textContent=p.detail;document.getElementById('bar').style.width=p.percent+'%';document.getElementById('percent').textContent=p.percent+'%';document.getElementById('status').textContent=p.status;}window.update=update;update(${safe});</script></body></html>`;
+  if (!transferDialog || transferDialog.isDestroyed()) {
+    transferDialog = new BrowserWindow({ width: 470, height: 205, frame: false, resizable: false, movable: true, minimizable: false, maximizable: false, alwaysOnTop: true, show: false, backgroundColor: '#edf2f5', skipTaskbar: true, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true } });
+    transferDialog.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+    transferDialog.once('ready-to-show', () => transferDialog.show());
+    transferDialog.on('closed', () => { transferDialog = null; });
+  } else {
+    transferDialog.webContents.executeJavaScript('window.update(' + safe + ')').catch(() => {});
+    if (!transferDialog.isVisible()) transferDialog.show();
+  }
+  if (payload.done || payload.failed) setTimeout(() => { if (transferDialog && !transferDialog.isDestroyed()) transferDialog.close(); }, 4500);
 }
 app.whenReady().then(async () => {
   const cfg = await readConfig();
-  app.setLoginItemSettings({ openAtLogin: !!cfg.autoStart });
+  app.setLoginItemSettings({ openAtLogin: cfg.autoStart !== false, args: ['--hidden'] });
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 });
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.on('second-instance', () => { if (win) { win.show(); win.focus(); } });
+app.on('before-quit', () => { isQuitting = true; if (watcher) { watcher.close(); watcher = null; } if (watcherPoll) { clearInterval(watcherPoll); watcherPoll = null; } if (tray) { tray.destroy(); tray = null; } });
+app.on('window-all-closed', () => {});
 
+ipcMain.handle('window-control', async (_e, action) => { if (!win) return false; if (action === 'minimize') win.minimize(); else if (action === 'hide') win.hide(); else if (action === 'close') win.hide(); return true; });
+ipcMain.handle('transfer-dialog', async (_e, payload) => { showTransferDialog(payload || {}); return true; });
 ipcMain.handle('device-info', async () => { const c = await readConfig(); return { name: os.hostname(), id: c.deviceId, version: app.getVersion(), platform: process.platform, arch: process.arch }; });
 ipcMain.handle('get-settings', async () => { const c = await readConfig(); return { ...c, trustedDevices: c.trustedDevices || [] }; });
 ipcMain.handle('save-settings', async (_e, patch) => {
   const allowed = {};
   for (const key of ['receiveFolder', 'monitorFolder', 'autoTargetPeerId', 'autoStart']) if (patch && Object.prototype.hasOwnProperty.call(patch, key)) allowed[key] = patch[key];
   const c = await writeConfig(allowed);
-  app.setLoginItemSettings({ openAtLogin: !!c.autoStart });
+  app.setLoginItemSettings({ openAtLogin: c.autoStart !== false, args: ['--hidden'] });
   return c;
 });
 ipcMain.handle('store-peer-token', async (_e, receiverId, token) => { const c = await readConfig(); const peerTokens = { ...(c.peerTokens || {}), [String(receiverId)]: String(token) }; await writeConfig({ peerTokens }); return true; });
@@ -74,6 +117,7 @@ ipcMain.handle('pick-folder', async () => {
 ipcMain.handle('start-folder-watch', async () => {
   const c = await readConfig();
   if (watcher) { watcher.close(); watcher = null; }
+  if (watcherPoll) { clearInterval(watcherPoll); watcherPoll = null; }
   if (!c.monitorFolder) return { ok: false, reason: 'Pasta monitorada não configurada.' };
   await fs.promises.access(c.monitorFolder, fs.constants.R_OK);
   watcher = fs.watch(c.monitorFolder, { persistent: true }, async (_event, filename) => {
@@ -111,6 +155,23 @@ ipcMain.handle('start-folder-watch', async () => {
     } catch (e) { await appendLog({ level: 'warning', event: 'folder-watch-file-error', details: { file: path.basename(full), message: e.message } }); }
     finally { watchPending.delete(full); }
   });
+  watcherPoll = setInterval(async () => {
+    try {
+      const entries = await fs.promises.readdir(c.monitorFolder, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isFile() || entry.name.startsWith('.') || entry.name.startsWith('~') || /\\.(part|tmp|temp|crdownload|download|partial)$/i.test(entry.name)) continue;
+        const full = path.join(c.monitorFolder, entry.name);
+        if (!watchPending.has(full)) {
+          const stat = await fs.promises.stat(full);
+          if (stat.isFile() && watchDelivered.get(full) !== stat.size + ':' + stat.mtimeMs) {
+            // Reuse the same readiness pipeline by scheduling a synthetic watcher event.
+            setTimeout(() => { if (watcher) watcher.emit('change', entry.name); }, 0);
+          }
+        }
+      }
+    } catch (e) { await appendLog({ level: 'warning', event: 'folder-watch-rescan-failed', details: { message: e.message } }); }
+  }, 10000);
+  watcherPoll.unref?.();
   return { ok: true };
 });
 ipcMain.handle('pick-files', async () => {
