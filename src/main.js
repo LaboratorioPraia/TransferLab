@@ -127,6 +127,7 @@ ipcMain.handle('start-folder-watch', async () => {
   if (watcher) { watcher.close(); watcher = null; }
   if (watcherPoll) { clearInterval(watcherPoll); watcherPoll = null; }
   if (!c.monitorFolder) return { ok: false, reason: 'Pasta monitorada não configurada.' };
+  if (!c.autoTargetPeerId) return { ok: false, reason: 'Informe o código permanente do dispositivo de destino.' };
   await fs.promises.access(c.monitorFolder, fs.constants.R_OK);
   watchDelivered.clear();
   const baseline = await fs.promises.readdir(c.monitorFolder, { withFileTypes: true });
