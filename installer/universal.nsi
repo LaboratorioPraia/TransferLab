@@ -1,4 +1,5 @@
 !include "LogicLib.nsh"
+!include "x64.nsh"
 Name "TransferLab 0.2.0"
 OutFile "TransferLab-Setup-0.2.0.exe"
 RequestExecutionLevel user
