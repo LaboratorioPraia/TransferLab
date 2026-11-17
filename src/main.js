@@ -281,7 +281,7 @@ ipcMain.handle('diagnostic-self-test', async () => {
   catch (e) { result.tempError = e.message; } finally { try { await fs.promises.unlink(testPath); } catch {} }
   try { await fs.promises.mkdir(app.getPath('userData'), { recursive: true }); await fs.promises.access(app.getPath('userData'), fs.constants.W_OK); result.userDataWritable = true; } catch (e) { result.userDataError = e.message; }
   try { await appendLog({ level: 'info', event: 'diagnostic-self-test' }); result.logWritable = true; } catch (e) { result.logError = e.message; }
-  return { ...result, appVersion: app.getVersion(), platform: process.platform, arch: process.arch, freeMemory: os.freemem(), totalMemory: os.totalmem() };
+  return { ...result, appVersion: app.getVersion(), platform: process.platform, arch: process.arch, freeMemory: os.freemem(), totalMemory: os.totalmem(), background: { trayActive: !!tray, folderWatcherActive: !!watcher, folderRescanActive: !!watcherPoll, autoStartEnabled: !!app.getLoginItemSettings().openAtLogin } };
 });
 ipcMain.handle('diagnostic-read-logs', async () => { try { return (await fs.promises.readFile(logFile(), 'utf8')).trim().split('\n').filter(Boolean).slice(-500).map(line => { try { return JSON.parse(line); } catch { return { raw: line }; } }); } catch { return []; } });
 ipcMain.handle('diagnostic-log', async (_e, entry) => { try { await appendLog({ level: entry.level || 'info', event: String(entry.event || 'client-log').slice(0, 120), details: entry.details || null }); return true; } catch { return false; } });
