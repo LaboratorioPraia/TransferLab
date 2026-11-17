@@ -68,6 +68,17 @@ jobs:
           pattern: TransferLab-installer-*
           path: installer/payload
           merge-multiple: true
+      - name: Normalize downloaded payload files
+        shell: pwsh
+        run: |
+          $payload = Join-Path $PWD "installer/payload"
+          foreach ($arch in @("x64", "x86")) {
+            $name = "TransferLab-Setup-0.2.0-$arch.exe"
+            $found = Get-ChildItem $payload -Recurse -File -Filter $name | Select-Object -First 1
+            if (-not $found) { throw "Missing architecture installer: $name" }
+            $destination = Join-Path $payload $name
+            if ($found.FullName -ne $destination) { Copy-Item $found.FullName $destination -Force }
+          }
       - name: Install NSIS
         run: choco install nsis -y --no-progress
       - name: Build universal setup
