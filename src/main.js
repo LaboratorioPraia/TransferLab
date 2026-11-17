@@ -140,6 +140,7 @@ ipcMain.handle('start-folder-watch', async () => {
     const full = path.join(c.monitorFolder, fileName);
     if (watchPending.has(full)) return;
     watchPending.add(full);
+    let dispatched = false;
     try {
       const stat = await fs.promises.stat(full);
       if (!stat.isFile()) return;
@@ -152,7 +153,7 @@ ipcMain.handle('start-folder-watch', async () => {
         if (signatureNow === previous) stable++; else stable = 0;
         previous = signatureNow;
       }
-      if (stable < 15) { await appendLog({ level: 'warning', event: 'monitored-file-never-stabilized', details: { file: path.basename(full) } }); return; }
+      if (stable < 30) { await appendLog({ level: 'warning', event: 'monitored-file-never-stabilized', details: { file: path.basename(full) } }); return; }
       const finalStat = await fs.promises.stat(full);
       const signature = finalStat.size + ':' + finalStat.mtimeMs;
       if (watchDelivered.get(full) === signature) return;
@@ -162,11 +163,10 @@ ipcMain.handle('start-folder-watch', async () => {
       const afterRead = await handle.stat();
       await handle.close();
       if (afterRead.size !== finalStat.size || afterRead.mtimeMs !== finalStat.mtimeMs) { await appendLog({ level: 'warning', event: 'monitored-file-changed-during-read-check', details: { file: path.basename(full) } }); return; }
-      watchDelivered.set(full, signature);
-      if (win && !win.isDestroyed()) win.webContents.send('folder-file-ready', { path: full, name: path.basename(full), size: finalStat.size, mtimeMs: finalStat.mtimeMs });
+      if (win && !win.isDestroyed()) { win.webContents.send('folder-file-ready', { path: full, name: path.basename(full), size: finalStat.size, mtimeMs: finalStat.mtimeMs, signature }); dispatched = true; }
       await appendLog({ level: 'info', event: 'monitored-file-ready', details: { file: path.basename(full) } });
     } catch (e) { await appendLog({ level: 'warning', event: 'folder-watch-file-error', details: { file: path.basename(full), message: e.message } }); }
-    finally { watchPending.delete(full); }
+    finally { if (!dispatched) watchPending.delete(full); }
   });
   watcherPoll = setInterval(async () => {
     try {
@@ -186,6 +186,14 @@ ipcMain.handle('start-folder-watch', async () => {
   }, 10000);
   watcherPoll.unref?.();
   return { ok: true };
+});
+ipcMain.handle('folder-file-result', async (_e, file, success) => {
+  if (!file || typeof file.path !== 'string') return false;
+  const full = path.resolve(file.path);
+  if (success && typeof file.signature === 'string') watchDelivered.set(full, file.signature);
+  watchPending.delete(full);
+  await appendLog({ level: success ? 'info' : 'warning', event: success ? 'monitored-file-transfer-confirmed' : 'monitored-file-transfer-failed', details: { file: path.basename(full) } });
+  return true;
 });
 ipcMain.handle('pick-files', async () => {
   const r = await dialog.showOpenDialog(win, { properties: ['openFile', 'multiSelections'] });
