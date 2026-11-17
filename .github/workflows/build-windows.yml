@@ -73,7 +73,9 @@ jobs:
       - name: Build universal setup
         shell: pwsh
         run: |
-          makensis /V3 installer/universal.nsi
+          $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          if (-not (Test-Path $makensis)) { throw "NSIS compiler not found at $makensis" }
+          & $makensis /V3 installer/universal.nsi
           if (-not (Test-Path "TransferLab-Setup-0.2.0.exe")) { throw "Universal installer not generated" }
       - name: Upload universal installer
         uses: actions/upload-artifact@v4
