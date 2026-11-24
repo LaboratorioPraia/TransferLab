@@ -1,6 +1,14 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('transferAPI', {
   deviceInfo: () => ipcRenderer.invoke('device-info'),
+  historyList: () => ipcRenderer.invoke('history-list'),
+  historyRecord: entry => ipcRenderer.invoke('history-record', entry),
+  historyRetryFile: id => ipcRenderer.invoke('history-retry-file', id),
+  historyMarkRetried: id => ipcRenderer.invoke('history-mark-retried', id),
+  clearAppData: () => ipcRenderer.invoke('clear-app-data'),
+  checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
+  downloadUpdate: (assetUrl, checksumUrl, version) => ipcRenderer.invoke('download-update', assetUrl, checksumUrl, version),
+  installUpdate: () => ipcRenderer.invoke('install-update'),
   windowControl: action => ipcRenderer.invoke('window-control', action),
   transferDialog: payload => ipcRenderer.invoke('transfer-dialog', payload),
   getSettings: () => ipcRenderer.invoke('get-settings'),
