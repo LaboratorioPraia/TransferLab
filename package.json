@@ -1,7 +1,7 @@
 {
   "name": "transferlab",
-  "version": "0.1.4",
-  "description": "Transferência segura de arquivos entre dispositivos",
+  "version": "0.2.1",
+  "description": "Transferência contínua de arquivos entre dispositivos",
   "main": "src/main.js",
   "author": "TransferLab",
   "license": "MIT",
@@ -31,13 +31,15 @@
       "target": [
         "nsis"
       ],
-      "artifactName": "TransferLab-Setup-${version}.${ext}"
+      "artifactName": "TransferLab-Setup-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "perMachine": false,
+      "runAfterFinish": true
     }
   }
 }

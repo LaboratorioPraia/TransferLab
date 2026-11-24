@@ -1,40 +1,137 @@
-name: Build Windows installer
+name: Build TransferLab 0.2.1 universal Windows installer
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
+      - feature/transferlab-0.2.0-universal-ui-background
+      - feature/transferlab-0.2.1-retry-history-updater
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
 
 jobs:
   build:
+    name: Build Windows ${{ matrix.arch }}
     runs-on: windows-latest
-
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            electron: 35.1.5
+            flag: x64
+          - arch: x86
+            electron: 22.3.27
+            flag: ia32
     steps:
-      - name: Baixar codigo
+      - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Instalar Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - name: Instalar dependencias
+      - name: Select Electron runtime
+        if: matrix.arch == 'x86'
+        run: npm pkg set devDependencies.electron=${{ matrix.electron }}
+      - name: Install dependencies
         run: npm install
-
-      - name: Validar sintaxe JavaScript
+      - name: Validate JavaScript
         run: |
           node --check src/main.js
           node --check src/preload.js
           node --check src/renderer.js
           node --check src/diagnostics.js
-
-      - name: Compilar aplicativo
-        run: npm run dist -- --publish never
-
-      - name: Disponibilizar instalador
+      - name: Build installer
+        run: npm run dist -- --${{ matrix.flag }} --publish never
+      - name: Normalize installer name
+        shell: pwsh
+        run: |
+          $file = Get-ChildItem release -Filter "TransferLab-Setup-0.2.1-*.exe" | Where-Object { $_.Name -notlike "*.__uninstaller.exe" } | Select-Object -First 1
+          if (-not $file) { throw "Installer not found" }
+          $targetName = "TransferLab-Setup-0.2.1-${{ matrix.arch }}.exe"
+          if ($file.Name -ne $targetName) { Rename-Item $file.FullName $targetName -Force }
+      - name: Upload architecture installer
         uses: actions/upload-artifact@v4
         with:
-          name: TransferLab-0.1.4-Windows-Installer
-          path: release/*.exe
+          name: TransferLab-installer-${{ matrix.arch }}
+          path: release/TransferLab-Setup-0.2.1-${{ matrix.arch }}.exe
           if-no-files-found: error
+
+  universal-installer:
+    name: Assemble single architecture-aware installer
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Download x64 and x86 installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: TransferLab-installer-*
+          path: installer/payload
+          merge-multiple: true
+      - name: Normalize downloaded payload files
+        shell: pwsh
+        run: |
+          $payload = Join-Path $PWD "installer/payload"
+          foreach ($arch in @("x64", "x86")) {
+            $name = "TransferLab-Setup-0.2.1-$arch.exe"
+            $found = Get-ChildItem $payload -Recurse -File -Filter $name | Select-Object -First 1
+            if (-not $found) { throw "Missing architecture installer: $name" }
+            $destination = Join-Path $payload $name
+            if ($found.FullName -ne $destination) { Copy-Item $found.FullName $destination -Force }
+          }
+      - name: Install NSIS
+        run: choco install nsis -y --no-progress
+      - name: Build universal setup
+        shell: pwsh
+        run: |
+          $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          if (-not (Test-Path $makensis)) { throw "NSIS compiler not found at $makensis" }
+          & $makensis /V3 installer/universal.nsi
+          if (-not (Test-Path "TransferLab-Setup-0.2.1.exe")) { throw "Universal installer not generated" }
+      - name: Upload universal installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: TransferLab-0.2.1-Universal-Windows-Installer
+          path: TransferLab-Setup-0.2.1.exe
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish versioned release with checksums
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: universal-installer
+    runs-on: windows-latest
+    steps:
+      - name: Download universal installer
+        uses: actions/download-artifact@v4
+        with:
+          name: TransferLab-0.2.1-Universal-Windows-Installer
+      - name: Download architecture installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: TransferLab-installer-*
+          path: release-assets
+          merge-multiple: true
+      - name: Generate SHA-256 manifest
+        shell: pwsh
+        run: |
+          $files = @("TransferLab-Setup-0.2.1.exe") + (Get-ChildItem release-assets -Filter "*.exe" | ForEach-Object { $_.FullName })
+          $lines = foreach ($file in $files) { $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower(); "$hash  $(Split-Path $file -Leaf)" }
+          $lines | Set-Content -Encoding ascii SHA256SUMS.txt
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: TransferLab ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            TransferLab-Setup-0.2.1.exe
+            release-assets/*.exe
+            SHA256SUMS.txt
