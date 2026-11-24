@@ -26,6 +26,9 @@ async function init(){
   $('myId').textContent=deviceInfo.id;
   $('connectionState').textContent='Código permanente carregado; conectando ao serviço…';
   await populateSettings();
+  await renderHistory();
+  await checkForUpdates(false);
+  setInterval(()=>checkForUpdates(false),6*60*60*1000);
   peer=new Peer(deviceInfo.id,PEER_OPTIONS);window.transferPeer=peer;
   peer.on('open',id=>{$('myId').textContent=id;$('connectionState').textContent='Disponível para conectar';log('info','peer-open',{peerId:id});});
   peer.on('connection',connection=>{if(conn&&(conn.open||conn.opening)){connection.close();log('warning','incoming-connection-rejected',{reason:'busy'});return;}attach(connection);});
@@ -80,9 +83,10 @@ async function sendFile(file,connection){
   if(!(await completed))throw new Error('O receptor não confirmou a gravação final; arquivo não será considerado enviado.');
   ui.bar.style.width='100%';ui.pct.textContent='100%';ui.meta.textContent=fmt(file.size)+' · Recebimento confirmado pelo destino';window.transferAPI.transferDialog({direction:'send',name:file.name,detail:fmt(file.size),percent:100,status:'Enviado e validado',done:true}).catch(()=>{});
   await log('info','transfer-sent-confirmed',{name:file.name,size:file.size,remoteDeviceId:remoteDevice?.id||null});
+  await saveTransferHistory({direction:'send',status:'success',name:file.name,size:file.size,sourcePath:file.path,remoteDeviceId:remoteDevice?.id||null});
  }catch(error){
   if(connection?.open){try{safeSend(connection,{type:'file-abort',protocol:4,id,reason:String(error.message||error).slice(0,300)});}catch{}}
-  ui.pct.textContent='Falha';ui.meta.textContent=fmt(file.size)+' · Envio interrompido';window.transferAPI.transferDialog({direction:'send',name:file.name,detail:fmt(file.size),percent:0,status:error.message||'Falha no envio',failed:true}).catch(()=>{});
+  ui.pct.textContent='Falha';ui.meta.textContent=fmt(file.size)+' · Envio interrompido';await saveTransferHistory({direction:'send',status:'failed',name:file.name,size:file.size,sourcePath:file.path,remoteDeviceId:remoteDevice?.id||null,error:error.message,technical:error.stack||error.message});window.transferAPI.transferDialog({direction:'send',name:file.name,detail:fmt(file.size),percent:0,status:error.message||'Falha no envio',failed:true}).catch(()=>{});
   throw error;
  }finally{
   expectedSizes.delete(id);
@@ -155,6 +159,46 @@ async function handleData(data,connection){
 async function waitForRemote(targetId,timeout=45000){
  const started=Date.now();while(Date.now()-started<timeout){if(conn?.open&&remoteDevice?.id===targetId)return true;if(conn&&(conn.open||conn.opening)&&remoteDevice&&remoteDevice.id!==targetId)throw new Error('Outro dispositivo está conectado.');await new Promise(resolve=>setTimeout(resolve,250));}throw new Error('O destino não concluiu a identificação dentro do prazo.');
 }
+function explainTransferError(message) {
+ const value=String(message||'Falha desconhecida');
+ if(/90 segundos|confirmou o início/i.test(value))return 'O computador de destino não confirmou o início. Verifique se o TransferLab está aberto e conectado.';
+ if(/conexão|canal|connection|peer|sinalização/i.test(value))return 'A conexão entre os computadores foi interrompida ou não ficou disponível.';
+ if(/mudou|alterado|estabilidade|origem/i.test(value))return 'O arquivo ainda estava sendo alterado ou mudou durante a leitura. Aguarde a conclusão da gravação e tente novamente.';
+ if(/sha-?256|integridade|hash/i.test(value))return 'A verificação de integridade não correspondeu. O arquivo não foi publicado no destino.';
+ if(/bloco|bytes|gravação|disco|write/i.test(value))return 'Houve uma falha durante a gravação de um bloco do arquivo.';
+ if(/timeout|tempo limite/i.test(value))return 'O tempo de resposta do computador de destino foi excedido.';
+ return 'Não foi possível concluir a transferência. Consulte os detalhes técnicos e tente novamente.';
+}
+async function saveTransferHistory(entry) {
+ try { await window.transferAPI.historyRecord(entry); await renderHistory(); }
+ catch(error) { await log('error','history-save-failed',{message:error.message}); }
+}
+async function renderHistory() {
+ const host=$('historyList');if(!host)return;
+ let items=[];try{items=await window.transferAPI.historyList();}catch(error){host.textContent='Não foi possível carregar o histórico: '+error.message;return;}
+ host.innerHTML='';
+ if(!items.length){host.className='history-list empty';host.textContent='Nenhuma transferência registrada ainda.';return;}
+ host.className='history-list';
+ for(const item of items){
+  const card=document.createElement('div');card.className='history-item';
+  const info=document.createElement('div');const title=document.createElement('b');title.textContent=item.name||'Arquivo';
+  const meta=document.createElement('small');meta.textContent=(item.direction==='receive'?'Recebido':'Enviado')+' · '+fmt(item.size||0)+' · '+new Date(item.at).toLocaleString()+(item.retries?' · '+item.retries+' tentativa(s)':'');
+  info.append(title,meta);
+  const actions=document.createElement('div');actions.className='history-actions';
+  const status=document.createElement('span');status.className='history-status '+(item.status==='success'||item.status==='retried'?'success':item.status==='failed'?'failed':'');status.textContent=item.status==='success'?'Concluído':item.status==='retried'?'Reenviado':'Falhou';actions.append(status);
+  if(item.direction==='send'&&item.status==='failed'&&item.sourcePath){const retry=document.createElement('button');retry.className='retry-button';retry.textContent='Tentar novamente';retry.onclick=async()=>{retry.disabled=true;retry.textContent='Preparando…';try{if(!conn?.open||!remoteDevice)throw new Error('Conecte ao computador de destino antes de reenviar.');const file=await window.transferAPI.historyRetryFile(item.id);await sendFile(file,conn);await window.transferAPI.historyMarkRetried(item.id);toast('Reenvio concluído.');}catch(error){toast(explainTransferError(error.message));await log('error','manual-retry-failed',{historyId:item.id,message:error.message});}finally{await renderHistory();}};actions.append(retry);}
+  card.append(info,actions);
+  if(item.status==='failed'&&item.error){const error=document.createElement('div');error.className='history-error';error.textContent=explainTransferError(item.error)+' '+item.error;card.append(error);}
+  host.append(card);
+ }
+}
+async function checkForUpdates(showNoUpdate=false) {
+ const button=$('updateButton');if(!button)return;
+ try{const result=await window.transferAPI.checkForUpdates();button.classList.toggle('available',!!result.available);button.title=result.available?'Atualização '+result.version+' disponível':'Verificar atualizações';
+  if(result.available){button.onclick=async()=>{const choice=confirm('TransferLab '+result.version+' está disponível. Baixar e instalar agora?');if(!choice)return;button.disabled=true;try{toast('Baixando atualização e verificando SHA-256…');await window.transferAPI.downloadUpdate(result.assetUrl,result.checksumUrl,result.version);toast('Download verificado. O instalador será aberto.');await window.transferAPI.installUpdate();}catch(error){toast('Não foi possível atualizar: '+error.message);await log('error','update-install-failed',{message:error.message});}finally{button.disabled=false;}};}
+  else {button.onclick=async()=>{toast(result.error?'Não foi possível verificar atualizações.':'Você já está usando a versão mais recente.');};if(showNoUpdate&&!result.error)toast('TransferLab atualizado.');}
+ }catch(error){await log('warning','update-check-ui-failed',{message:error.message});}
+}
 async function autoSendFileNow(file){
  let success=false;
  try{
@@ -169,6 +213,8 @@ async function autoSendFileNow(file){
 }
 $('minimizeWindow').onclick=()=>window.transferAPI.windowControl('minimize');
 $('hideWindow').onclick=()=>window.transferAPI.windowControl('hide');
+$('refreshHistory').onclick=renderHistory;
+$('clearAppData').onclick=async()=>{try{await window.transferAPI.clearAppData();}catch(error){toast('Não foi possível limpar os dados: '+error.message);}};
 $('copyId').onclick=async()=>{try{await navigator.clipboard.writeText(deviceInfo?.id||'');toast('Código permanente copiado.');}catch{toast('Não foi possível copiar o código.');}};
 $('trustCurrentBtn').onclick=async()=>{if(!remoteDevice||!conn?.open)return;try{settings=await window.transferAPI.getSettings();const token=crypto.randomUUID()+crypto.randomUUID();settings.trustedDevices=await window.transferAPI.trustDevice(remoteDevice,token);remoteAuthenticated=true;safeSend(conn,{type:'trust-grant',receiverId:deviceInfo.id,token});renderTrusted();toast('Dispositivo autorizado para enviar arquivos automaticamente a este computador.');}catch(e){toast('Não foi possível autorizar: '+e.message);await log('error','trust-device-failed',{message:e.message});}};
 function renderTrusted(){const host=$('trustedList');if(!host)return;host.innerHTML='';(settings?.trustedDevices||[]).forEach(device=>{const item=document.createElement('div');item.className='setting';const label=document.createElement('b');label.textContent=device.name+' · '+device.id;const btn=document.createElement('button');btn.className='secondary';btn.textContent='Remover';btn.onclick=async()=>{settings.trustedDevices=await window.transferAPI.untrustDevice(device.id);renderTrusted();};item.append(label,btn);host.appendChild(item);});}
