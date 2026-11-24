@@ -63,7 +63,7 @@ function compareVersions(a, b) {
 function requestBuffer(url, redirects = 0) {
   return new Promise((resolve, reject) => {
     if (redirects > 5) return reject(new Error('Muitos redirecionamentos ao baixar a atualização.'));
-    https.get(url, { headers: { 'User-Agent': 'TransferLab-Updater', 'Accept': 'application/octet-stream' } }, response => {
+    https.get(url, { headers: { 'User-Agent': 'TransferLab-Updater', 'Accept': 'application/vnd.github+json' } }, response => {
       if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location) {
         response.resume();
         return resolve(requestBuffer(response.headers.location, redirects + 1));
