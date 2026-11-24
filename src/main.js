@@ -83,7 +83,24 @@ async function getLatestRelease() {
   const checksum = (release.assets || []).find(item => item.name === 'SHA256SUMS.txt');
   return { version: String(release.tag_name || '').replace(/^v/, ''), name: release.name || release.tag_name, notes: String(release.body || '').slice(0, 4000), url: release.html_url, assetUrl: asset?.browser_download_url || null, checksumUrl: checksum?.browser_download_url || null };
 }
- try { return (await fs.promises.readFile(logFile(), 'utf8')).trim().split('\n').filter(Boolean).slice(-500).map(line => { try { return JSON.parse(line); } catch { return { raw: line }; } }); } catch { return []; } }
+async function readLogs() { try { return (await fs.promises.readFile(logFile(), 'utf8')).trim().split('\n').filter(Boolean).slice(-500).map(line => { try { return JSON.parse(line); } catch { return { raw: line }; } }); } catch { return []; } }
+async function migrateHistoryFromLogs() {
+  if (fs.existsSync(historyFile())) return;
+  const logs = await readLogs();
+  const migrated = [];
+  for (const item of logs) {
+    const details = item.details || {};
+    if (item.event === 'transfer-sent-confirmed') {
+      migrated.push({ id: crypto.randomUUID(), at: item.at || new Date().toISOString(), direction: 'send', status: 'success', name: String(details.name || 'Arquivo'), size: Number(details.size) || 0, sourcePath: null, remoteDeviceId: String(details.remoteDeviceId || ''), error: '', technical: '', migratedFromLog: true });
+    } else if (item.event === 'transfer-received-confirmed') {
+      migrated.push({ id: crypto.randomUUID(), at: item.at || new Date().toISOString(), direction: 'receive', status: 'success', name: String(details.name || 'Arquivo'), size: Number(details.size) || 0, sourcePath: null, remoteDeviceId: '', error: '', technical: '', migratedFromLog: true });
+    } else if (item.event === 'automatic-send-failed') {
+      migrated.push({ id: crypto.randomUUID(), at: item.at || new Date().toISOString(), direction: 'send', status: 'failed', name: String(details.file || 'Arquivo'), size: 0, sourcePath: null, remoteDeviceId: '', error: String(details.message || 'Falha no envio automático'), technical: '', migratedFromLog: true });
+    }
+  }
+  await writeHistory(migrated);
+  await appendLog({ level: 'info', event: 'history-migrated-from-legacy-logs', details: { imported: migrated.length } });
+}
 async function appendLog(entry) {
   const file = logFile();
   await fs.promises.mkdir(path.dirname(file), { recursive: true });
@@ -139,6 +156,7 @@ if (!singleInstance) {
 } else {
 app.whenReady().then(async () => {
   const cfg = await readConfig();
+  await migrateHistoryFromLogs();
   app.setLoginItemSettings({ openAtLogin: cfg.autoStart !== false, args: ['--hidden'] });
   createWindow();
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
