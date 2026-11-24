@@ -3,6 +3,8 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
+const https = require('https');
+const { spawn } = require('child_process');
 
 let win;
 let tray = null;
@@ -15,6 +17,8 @@ const watchPending = new Set();
 const watchDelivered = new Map();
 const configPath = () => path.join(app.getPath('userData'), 'settings.json');
 const logFile = () => path.join(app.getPath('userData'), 'logs', 'transferlab.log');
+const historyFile = () => path.join(app.getPath('userData'), 'history.json');
+let downloadedUpdatePath = null;
 const defaults = () => ({ deviceId: crypto.randomUUID(), trustedDevices: [], peerTokens: {}, receiveFolder: path.join(os.homedir(), 'Downloads', 'TransferLab'), monitorFolder: '', autoTargetPeerId: '', autoStart: true, settingsVersion: 2 });
 async function readConfig() {
   try { const stored = JSON.parse(await fs.promises.readFile(configPath(), 'utf8')); const merged = { ...defaults(), ...stored }; if ((stored.settingsVersion || 0) < 2) { merged.autoStart = true; merged.settingsVersion = 2; await fs.promises.writeFile(configPath(), JSON.stringify(merged, null, 2), 'utf8'); } return merged; }
@@ -27,7 +31,59 @@ async function writeConfig(patch) {
   await fs.promises.writeFile(configPath(), JSON.stringify(next, null, 2), 'utf8');
   return next;
 }
-async function readLogs() { try { return (await fs.promises.readFile(logFile(), 'utf8')).trim().split('\n').filter(Boolean).slice(-500).map(line => { try { return JSON.parse(line); } catch { return { raw: line }; } }); } catch { return []; } }
+async function readHistory() {
+  try {
+    const parsed = JSON.parse(await fs.promises.readFile(historyFile(), 'utf8'));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+async function writeHistory(items) {
+  const file = historyFile();
+  await fs.promises.mkdir(path.dirname(file), { recursive: true });
+  const temp = file + '.tmp';
+  await fs.promises.writeFile(temp, JSON.stringify(items.slice(-500), null, 2), 'utf8');
+  await fs.promises.rename(temp, file);
+}
+async function addHistory(entry) {
+  const items = await readHistory();
+  const record = { id: crypto.randomUUID(), at: new Date().toISOString(), retries: 0, ...entry };
+  items.push(record);
+  await writeHistory(items);
+  return record;
+}
+function compareVersions(a, b) {
+  const aa = String(a).replace(/^v/i, '').split('.').map(Number);
+  const bb = String(b).replace(/^v/i, '').split('.').map(Number);
+  for (let i = 0; i < Math.max(aa.length, bb.length); i++) {
+    const x = aa[i] || 0, y = bb[i] || 0;
+    if (x !== y) return x > y ? 1 : -1;
+  }
+  return 0;
+}
+function requestBuffer(url, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    if (redirects > 5) return reject(new Error('Muitos redirecionamentos ao baixar a atualização.'));
+    https.get(url, { headers: { 'User-Agent': 'TransferLab-Updater', 'Accept': 'application/octet-stream' } }, response => {
+      if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location) {
+        response.resume();
+        return resolve(requestBuffer(response.headers.location, redirects + 1));
+      }
+      if (response.statusCode !== 200) { response.resume(); return reject(new Error('Download HTTP ' + response.statusCode)); }
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => resolve(Buffer.concat(chunks)));
+      response.on('error', reject);
+    }).on('error', reject).setTimeout(30000, function(){ this.destroy(new Error('Tempo limite da conexão excedido.')); });
+  });
+}
+async function getLatestRelease() {
+  const raw = await requestBuffer('https://api.github.com/repos/LaboratorioPraia/TransferLab/releases/latest');
+  const release = JSON.parse(raw.toString('utf8'));
+  const asset = (release.assets || []).find(item => item.name === 'TransferLab-Setup-' + String(release.tag_name || '').replace(/^v/, '') + '.exe');
+  const checksum = (release.assets || []).find(item => item.name === 'SHA256SUMS.txt');
+  return { version: String(release.tag_name || '').replace(/^v/, ''), name: release.name || release.tag_name, notes: String(release.body || '').slice(0, 4000), url: release.html_url, assetUrl: asset?.browser_download_url || null, checksumUrl: checksum?.browser_download_url || null };
+}
+ try { return (await fs.promises.readFile(logFile(), 'utf8')).trim().split('\n').filter(Boolean).slice(-500).map(line => { try { return JSON.parse(line); } catch { return { raw: line }; } }); } catch { return []; } }
 async function appendLog(entry) {
   const file = logFile();
   await fs.promises.mkdir(path.dirname(file), { recursive: true });
@@ -94,6 +150,82 @@ app.on('window-all-closed', () => {});
 
 ipcMain.handle('window-control', async (_e, action) => { if (!win) return false; if (action === 'minimize') win.minimize(); else if (action === 'hide') win.hide(); else if (action === 'close') win.hide(); return true; });
 ipcMain.handle('transfer-dialog', async (_e, payload) => { showTransferDialog(payload || {}); return true; });
+ipcMain.handle('history-list', async () => (await readHistory()).slice().reverse());
+ipcMain.handle('history-record', async (_e, entry) => {
+  const safe = {
+    direction: entry?.direction === 'receive' ? 'receive' : 'send',
+    status: entry?.status === 'success' ? 'success' : 'failed',
+    name: String(entry?.name || 'Arquivo').slice(0, 240),
+    size: Math.max(0, Number(entry?.size) || 0),
+    sourcePath: entry?.direction === 'receive' ? null : (typeof entry?.sourcePath === 'string' ? entry.sourcePath : null),
+    remoteDeviceId: String(entry?.remoteDeviceId || '').slice(0, 120),
+    error: String(entry?.error || '').slice(0, 1200),
+    technical: String(entry?.technical || '').slice(0, 4000)
+  };
+  return addHistory(safe);
+});
+ipcMain.handle('history-retry-file', async (_e, id) => {
+  const items = await readHistory();
+  const item = items.find(x => x.id === id);
+  if (!item || item.direction !== 'send' || item.status !== 'failed' || !item.sourcePath) throw new Error('Este registro não possui arquivo de origem disponível para reenvio.');
+  const stat = await fs.promises.stat(item.sourcePath);
+  if (!stat.isFile()) throw new Error('O arquivo original não está mais disponível.');
+  return { path: item.sourcePath, name: item.name, size: stat.size, mtimeMs: stat.mtimeMs };
+});
+ipcMain.handle('history-mark-retried', async (_e, id) => {
+  const items = await readHistory();
+  const item = items.find(x => x.id === id);
+  if (!item) return false;
+  item.retries = (Number(item.retries) || 0) + 1;
+  item.lastRetryAt = new Date().toISOString();
+  item.status = 'retried';
+  await writeHistory(items);
+  return true;
+});
+ipcMain.handle('clear-app-data', async () => {
+  const answer = await dialog.showMessageBox(win, { type: 'warning', buttons: ['Cancelar', 'Apagar dados e reiniciar'], defaultId: 0, cancelId: 0, title: 'Instalação limpa', message: 'Apagar configurações, dispositivos confiáveis, histórico e logs?', detail: 'Os arquivos já recebidos nas pastas escolhidas não serão apagados. Esta ação não pode ser desfeita.' });
+  if (answer.response !== 1) return { canceled: true };
+  await Promise.all([configPath(), historyFile(), path.dirname(logFile())].map(target => fs.promises.rm(target, { recursive: true, force: true })));
+  app.relaunch();
+  app.exit(0);
+  return { canceled: false };
+});
+ipcMain.handle('check-for-updates', async () => {
+  try {
+    const release = await getLatestRelease();
+    return { ...release, available: !!release.assetUrl && compareVersions(release.version, app.getVersion()) > 0, currentVersion: app.getVersion() };
+  } catch (error) {
+    await appendLog({ level: 'warning', event: 'update-check-failed', details: { message: error.message } });
+    return { available: false, error: error.message, currentVersion: app.getVersion() };
+  }
+});
+ipcMain.handle('download-update', async (_e, assetUrl, checksumUrl, expectedVersion) => {
+  if (typeof assetUrl !== 'string' || !assetUrl.startsWith('https://github.com/')) throw new Error('Endereço de atualização inválido.');
+  const expectedName = 'TransferLab-Setup-' + String(expectedVersion || '').replace(/^v/, '') + '.exe';
+  const tempPath = path.join(app.getPath('temp'), expectedName);
+  const buffer = await requestBuffer(assetUrl);
+  if (buffer.length < 1024 * 1024 || buffer.subarray(0, 2).toString('ascii') !== 'MZ') throw new Error('O instalador baixado é inválido ou está incompleto.');
+  if (checksumUrl) {
+    if (!checksumUrl.startsWith('https://github.com/')) throw new Error('Endereço de checksum inválido.');
+    const sums = (await requestBuffer(checksumUrl)).toString('utf8');
+    const line = sums.split(/\r?\n/).find(value => value.trim().endsWith(expectedName));
+    if (!line) throw new Error('Não foi encontrado o SHA-256 deste instalador.');
+    const expectedHash = line.trim().split(/\s+/)[0].toLowerCase();
+    const actualHash = crypto.createHash('sha256').update(buffer).digest('hex');
+    if (expectedHash !== actualHash) throw new Error('A verificação SHA-256 do instalador falhou.');
+  }
+  await fs.promises.writeFile(tempPath, buffer);
+  downloadedUpdatePath = tempPath;
+  await appendLog({ level: 'info', event: 'update-downloaded', details: { version: expectedVersion, size: buffer.length } });
+  return { ok: true, path: tempPath, size: buffer.length };
+});
+ipcMain.handle('install-update', async () => {
+  if (!downloadedUpdatePath || !fs.existsSync(downloadedUpdatePath)) throw new Error('Baixe a atualização antes de instalar.');
+  const child = spawn(downloadedUpdatePath, [], { detached: true, stdio: 'ignore', windowsHide: false });
+  child.unref();
+  setTimeout(() => app.quit(), 500);
+  return true;
+});
 ipcMain.handle('device-info', async () => { const c = await readConfig(); return { name: os.hostname(), id: c.deviceId, version: app.getVersion(), platform: process.platform, arch: process.arch }; });
 ipcMain.handle('get-settings', async () => { const c = await readConfig(); return { ...c, trustedDevices: c.trustedDevices || [] }; });
 ipcMain.handle('save-settings', async (_e, patch) => {
