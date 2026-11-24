@@ -150,8 +150,8 @@ async function handleData(data,connection){
   if(!incoming||data.id!==incoming.id)return;const current=incoming;
   if(current.received!==current.size){safeSend(connection,{type:'file-reject',id:current.id,reason:'size-mismatch'});await window.transferAPI.saveAbort(current.path);current.ui.pct.textContent='Falha';incoming=null;return;}
   const result=await window.transferAPI.saveFinish(current.path,current.finalPath,current.size,data.sha256);
-  if(result.ok&&result.size===current.size){current.ui.bar.style.width='100%';current.ui.pct.textContent='100%';current.ui.meta.textContent=fmt(result.size)+' · Recebido e validado (SHA-256)';window.transferAPI.transferDialog({direction:'receive',name:current.name,detail:fmt(result.size),percent:100,status:'Recebido e validado',done:true}).catch(()=>{});safeSend(connection,{type:'file-complete',id:current.id,size:result.size});toast('Arquivo recebido e confirmado: '+current.name);await window.transferAPI.diagnosticLog({level:'info',event:'transfer-received-confirmed',details:{name:current.name,size:result.size,path:result.path}});}
-  else{await window.transferAPI.saveAbort(current.path);safeSend(connection,{type:'file-reject',id:current.id,reason:result.reason||'write-failed'});current.ui.pct.textContent='Falha';window.transferAPI.transferDialog({direction:'receive',name:current.name,detail:fmt(current.size),percent:0,status:'Falha na validação do arquivo',failed:true}).catch(()=>{});}
+  if(result.ok&&result.size===current.size){current.ui.bar.style.width='100%';current.ui.pct.textContent='100%';current.ui.meta.textContent=fmt(result.size)+' · Recebido e validado (SHA-256)';window.transferAPI.transferDialog({direction:'receive',name:current.name,detail:fmt(result.size),percent:100,status:'Recebido e validado',done:true}).catch(()=>{});safeSend(connection,{type:'file-complete',id:current.id,size:result.size});toast('Arquivo recebido e confirmado: '+current.name);await window.transferAPI.diagnosticLog({level:'info',event:'transfer-received-confirmed',details:{name:current.name,size:result.size,path:result.path}});await saveTransferHistory({direction:'receive',status:'success',name:current.name,size:result.size,remoteDeviceId:remoteDevice?.id||null});}
+  else{await window.transferAPI.saveAbort(current.path);safeSend(connection,{type:'file-reject',id:current.id,reason:result.reason||'write-failed'});current.ui.pct.textContent='Falha';await saveTransferHistory({direction:'receive',status:'failed',name:current.name,size:current.size,error:result.reason||'write-failed',technical:'Falha ao validar o arquivo recebido.'});window.transferAPI.transferDialog({direction:'receive',name:current.name,detail:fmt(current.size),percent:0,status:'Falha na validação do arquivo',failed:true}).catch(()=>{});}
   incoming=null;return;
  }
  if(data.type==='file-complete'){const expected=expectedSizes.get(data.id);expectedSizes.delete(data.id);resolvePending(pendingComplete,data.id,Number(data.size)===expected);return;}
@@ -196,19 +196,19 @@ async function checkForUpdates(showNoUpdate=false) {
  const button=$('updateButton');if(!button)return;
  try{const result=await window.transferAPI.checkForUpdates();button.classList.toggle('available',!!result.available);button.title=result.available?'Atualização '+result.version+' disponível':'Verificar atualizações';
   if(result.available){button.onclick=async()=>{const choice=confirm('TransferLab '+result.version+' está disponível. Baixar e instalar agora?');if(!choice)return;button.disabled=true;try{toast('Baixando atualização e verificando SHA-256…');await window.transferAPI.downloadUpdate(result.assetUrl,result.checksumUrl,result.version);toast('Download verificado. O instalador será aberto.');await window.transferAPI.installUpdate();}catch(error){toast('Não foi possível atualizar: '+error.message);await log('error','update-install-failed',{message:error.message});}finally{button.disabled=false;}};}
-  else {button.onclick=async()=>{toast(result.error?'Não foi possível verificar atualizações.':'Você já está usando a versão mais recente.');};if(showNoUpdate&&!result.error)toast('TransferLab atualizado.');}
+  else {button.onclick=async()=>{button.disabled=true;await checkForUpdates(true);button.disabled=false;};if(showNoUpdate&&!result.error)toast('TransferLab atualizado.');}
  }catch(error){await log('warning','update-check-ui-failed',{message:error.message});}
 }
 async function autoSendFileNow(file){
- let success=false;
+ let success=false,sendAttempted=false;
  try{
   if(!settings?.monitorFolder||!settings?.autoTargetPeerId)throw new Error('Configure a pasta monitorada e o dispositivo de destino.');
   const target=settings.autoTargetPeerId;
   if(!conn?.open){if(conn&&(conn.open||conn.opening))throw new Error('Há outra conexão em andamento.');if(!peer?.open)throw new Error('Serviço de sinalização indisponível.');attach(peer.connect(target,{reliable:true,serialization:'json'}));}
   await waitForRemote(target);
   if(remoteDevice?.id!==target)throw new Error('O dispositivo conectado não corresponde ao destino configurado.');
-  toast('Enviando automaticamente: '+file.name);await sendFile(file,conn);success=true;toast('Envio automático confirmado: '+file.name);
- }catch(e){await log('error','automatic-send-failed',{file:file.name,message:e.message});toast('Envio automático falhou: '+e.message);}
+  toast('Enviando automaticamente: '+file.name);sendAttempted=true;await sendFile(file,conn);success=true;toast('Envio automático confirmado: '+file.name);
+ }catch(e){await log('error','automatic-send-failed',{file:file.name,message:e.message});toast('Envio automático falhou: '+explainTransferError(e.message));if(!sendAttempted)await saveTransferHistory({direction:'send',status:'failed',name:file.name,size:file.size,sourcePath:file.path,remoteDeviceId:settings?.autoTargetPeerId||'',error:e.message,technical:e.stack||e.message});}
  finally{try{await window.transferAPI.folderFileResult(file,success);}catch(e){await log('error','folder-file-ack-failed',{message:e.message});}}
 }
 $('minimizeWindow').onclick=()=>window.transferAPI.windowControl('minimize');
