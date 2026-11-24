@@ -5,7 +5,7 @@ window.transferProtocolInfo = { version: 4, chunkBytes: CHUNK, encoding: 'base64
 const PEER_OPTIONS = { host: '0.peerjs.com', port: 443, path: '/', secure: true, debug: 1, config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] } };
 let peer=null, conn=null, files=[], incoming=null, deviceInfo=null, settings=null, remoteDevice=null, remoteAuthenticated=false;
 let transfers=0, receiveQueue=Promise.resolve(), autoQueue=Promise.resolve(), reconnectTimer=null;
-const pendingAccept=new Map(), pendingComplete=new Map(), pendingChunk=new Map(), expectedSizes=new Map();
+const pendingAccept=new Map(), pendingComplete=new Map(), pendingChunk=new Map(), expectedSizes=new Map(), rejectionReasons=new Map();
 const $=id=>document.getElementById(id);
 const log=(level,event,details={})=>window.transferAPI.diagnosticLog({level,event,details}).catch(()=>false);
 const toast=message=>{const el=$('toast');if(!el)return;el.textContent=message;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),4500);};
@@ -64,7 +64,7 @@ async function sendFile(file,connection){
   const sha256=await window.transferAPI.hashFile(file.path,{size:file.size,mtimeMs:file.mtimeMs});
   const accepted=waitFor(pendingAccept,id,90000);
   safeSend(connection,{type:'file-start',protocol:4,id,name:file.name,size:file.size});
-  if(!(await accepted))throw new Error('O receptor não confirmou o início do arquivo em 90 segundos.');
+  if(!(await accepted)){const reason=rejectionReasons.get(id);rejectionReasons.delete(id);throw new Error(reason?'O receptor recusou o arquivo: '+reason:'O receptor não confirmou o início do arquivo em 90 segundos.');}
   let offset=0;
   while(offset<file.size){
    if(!connection.open||connection!==conn)throw new Error('Conexão perdida durante o envio.');
@@ -89,7 +89,7 @@ async function sendFile(file,connection){
   ui.pct.textContent='Falha';ui.meta.textContent=fmt(file.size)+' · Envio interrompido';await saveTransferHistory({direction:'send',status:'failed',name:file.name,size:file.size,sourcePath:file.path,remoteDeviceId:remoteDevice?.id||null,error:error.message,technical:error.stack||error.message});window.transferAPI.transferDialog({direction:'send',name:file.name,detail:fmt(file.size),percent:0,status:error.message||'Falha no envio',failed:true}).catch(()=>{});
   throw error;
  }finally{
-  expectedSizes.delete(id);
+  expectedSizes.delete(id);rejectionReasons.delete(id);
   for(const map of [pendingAccept,pendingComplete]){const resolve=map.get(id);if(resolve)resolve(false);}
   for(const [key,resolve] of pendingChunk){if(key.startsWith(id+':'))resolve(false);}
  }
@@ -135,7 +135,7 @@ async function handleData(data,connection){
  if(data.type==='file-reject'){
   expectedSizes.delete(data.id);resolvePending(pendingAccept,data.id,false);resolvePending(pendingComplete,data.id,false);
   for(const [key] of pendingChunk)if(key.startsWith(data.id+':'))resolvePending(pendingChunk,key,false);
-  await log('warning','remote-rejected-transfer',{id:data.id,reason:data.reason||'unknown'});return;
+  rejectionReasons.set(data.id,String(data.reason||'unknown'));await log('warning','remote-rejected-transfer',{id:data.id,reason:data.reason||'unknown'});return;
  }
  if(data.type==='file-chunk'){
   if(!incoming||data.id!==incoming.id||typeof data.data!=='string'){safeSend(connection,{type:'file-chunk-ack',id:data.id,offset:data.offset,ok:false});return;}
@@ -161,6 +161,12 @@ async function waitForRemote(targetId,timeout=45000){
 }
 function explainTransferError(message) {
  const value=String(message||'Falha desconhecida');
+ if(/receptor recusou.*busy/i.test(value))return 'O computador de destino está ocupado recebendo outro arquivo. Aguarde e tente novamente.';
+ if(/receptor recusou.*cancelled/i.test(value))return 'O recebimento foi cancelado no computador de destino. Verifique a confirmação de recebimento.';
+ if(/receptor recusou.*invalid-metadata/i.test(value))return 'O destino rejeitou os dados do arquivo. Atualize os dois computadores para a mesma versão.';
+ if(/receptor recusou.*size-mismatch/i.test(value))return 'O tamanho do arquivo recebido ficou diferente do original. Tente novamente.';
+ if(/receptor recusou.*sha256-mismatch/i.test(value))return 'O arquivo chegou com conteúdo diferente do original. O destino descartou o arquivo por segurança.';
+ if(/receptor recusou.*write-failed/i.test(value))return 'O computador de destino não conseguiu gravar o arquivo. Verifique espaço livre e permissões da pasta.';
  if(/90 segundos|confirmou o início/i.test(value))return 'O computador de destino não confirmou o início. Verifique se o TransferLab está aberto e conectado.';
  if(/conexão|canal|connection|peer|sinalização/i.test(value))return 'A conexão entre os computadores foi interrompida ou não ficou disponível.';
  if(/mudou|alterado|estabilidade|origem/i.test(value))return 'O arquivo ainda estava sendo alterado ou mudou durante a leitura. Aguarde a conclusão da gravação e tente novamente.';
